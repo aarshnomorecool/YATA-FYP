@@ -360,6 +360,8 @@ class RedAgent:
         target_root = target_root.resolve()
         findings: list[VulnerabilityFinding] = []
         for source_file in target_root.rglob("*.py"):
+            if any(part in (".yata", ".git", ".venv", "__pycache__") for part in source_file.parts):
+                continue
             for detector in self.detectors:
                 detector_findings = detector.scan(source_file)
                 for finding in detector_findings:

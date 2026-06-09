@@ -215,7 +215,11 @@ class BlueAgent:
         target_root = target_root.resolve()
         temp_root = Path(tempfile.mkdtemp(prefix="yata_patched_"))
         patched_root = temp_root / target_root.name
-        shutil.copytree(target_root, patched_root)
+        shutil.copytree(
+            target_root,
+            patched_root,
+            ignore=shutil.ignore_patterns(".yata", ".git", ".venv", "__pycache__")
+        )
 
         relative_file = Path(str(finding.metadata.get("relative_file", Path(finding.affected_file).name)))
         patched_copy_file = patched_root / relative_file

@@ -13,6 +13,9 @@ class SecurityReport:
     generated_at: str
     repository_name: str
     mode: str
+    patch_mode: str
+    patch_applied_to_original: str
+    verification_result: str
     target_root: str
     final_root: str
     battle_status: str
@@ -33,6 +36,9 @@ class ReportGenerator:
         *,
         repository_name: str,
         mode: str,
+        patch_mode: str,
+        patch_applied_to_original: str,
+        verification_result: str,
         target_root: Path,
         final_root: Path,
         battle_status: str,
@@ -46,6 +52,9 @@ class ReportGenerator:
             generated_at=datetime.now(timezone.utc).isoformat(),
             repository_name=repository_name,
             mode=mode,
+            patch_mode=patch_mode,
+            patch_applied_to_original=patch_applied_to_original,
+            verification_result=verification_result,
             target_root=str(target_root),
             final_root=str(final_root),
             battle_status=battle_status,
@@ -60,7 +69,7 @@ class ReportGenerator:
     def write_reports(self, report: SecurityReport) -> dict[str, str]:
         reports_dir = self.reports_root
         reports_dir.mkdir(parents=True, exist_ok=True)
-        stem = datetime.now().strftime(f"yata_{report.repository_name}_%Y%m%d_%H%M%S")
+        stem = datetime.now().strftime("scan_%Y-%m-%d")
 
         json_path = reports_dir / f"{stem}.json"
         md_path = reports_dir / f"{stem}.md"
@@ -76,6 +85,9 @@ class ReportGenerator:
             f"- Generated at: {report.generated_at}",
             f"- Repository: {report.repository_name}",
             f"- Mode: {report.mode}",
+            f"- Patch Mode: {report.patch_mode}",
+            f"- Patch Applied To Original Repository: {report.patch_applied_to_original}",
+            f"- Verification Result: {report.verification_result}",
             f"- Target Root: {report.target_root}",
             f"- Final Root: {report.final_root}",
             f"- Battle Status: {report.battle_status}",

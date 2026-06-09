@@ -11,9 +11,11 @@ __pycache__/
 # Databases
 *.db
 
-# Reports
+# YATA Workspace
+.yata/
+
+# Generated Reports
 reports/
 
-# Temp
-temp/
-tmp/
+# Logs
+*.log

@@ -5,6 +5,7 @@ import json
 import shutil
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
             f"[white]Mode:[/white] {args.mode}"
         )
     )
+    console.print(f"[bold cyan][YATA][/bold cyan]\nMode: {args.mode.upper()}")
 
     red_agent = RedAgent()
     blue_agent = BlueAgent()
@@ -85,6 +87,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     mode_group = scan_parser.add_mutually_exclusive_group()
     mode_group.add_argument("--safe", action="store_true", help="Patch and verify on safe copies only")
     mode_group.add_argument("--apply", action="store_true", help="Apply verified patches back to the original repository")
+    mode_group.add_argument("--interactive", action="store_true", help="Ask user before applying verified patches back to the original repository")
     scan_parser.add_argument(
         "--max-rounds",
         type=int,
@@ -93,7 +96,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     args = parser.parse_args(raw_args)
-    args.mode = "apply" if getattr(args, "apply", False) else "safe"
+    if getattr(args, "apply", False):
+        args.mode = "apply"
+    elif getattr(args, "interactive", False):
+        args.mode = "interactive"
+    else:
+        args.mode = "safe"
     return args
 
 
@@ -125,6 +133,9 @@ def _run_repository(
     blue_agent: BlueAgent,
     report_generator: ReportGenerator,
 ) -> RepositoryRunSummary:
+    global console
+    console = Console(record=True)
+
     console.print(
         Panel.fit(
             f"[bold cyan]Repository: {repository_root.name}[/bold cyan]\n"
@@ -134,6 +145,45 @@ def _run_repository(
 
     referee = Referee()
     target_root = repository_root.resolve()
+
+    # Resolve workspace paths
+    yata_dir = target_root / ".yata"
+    reports_dir = yata_dir / "reports"
+    patches_dir = yata_dir / "patches"
+    scans_dir = yata_dir / "scans"
+    logs_dir = yata_dir / "logs"
+
+    # Initialize workspace subdirectories
+    yata_dir.mkdir(exist_ok=True)
+    reports_dir.mkdir(exist_ok=True)
+    patches_dir.mkdir(exist_ok=True)
+    scans_dir.mkdir(exist_ok=True)
+    logs_dir.mkdir(exist_ok=True)
+
+    # Initialize metadata file
+    metadata_file = yata_dir / "metadata.json"
+    metadata_content = {
+        "version": "0.3.1",
+        "workspace_initialized": True,
+        "created_by": "YATA"
+    }
+    metadata_file.write_text(json.dumps(metadata_content, indent=2), encoding="utf-8")
+
+    # Override report generator reports root
+    report_generator.reports_root = reports_dir
+
+    # Print user-friendly workspace terminal output
+    console.print("[bold cyan][YATA][/bold cyan]\nWorkspace initialized:")
+    console.print(f"{yata_dir}\n")
+    console.print("[bold cyan][YATA][/bold cyan]\nReports:")
+    console.print(".yata/reports/\n")
+    console.print("[bold cyan][YATA][/bold cyan]\nPatched Files:")
+    console.print(".yata/patches/\n")
+    console.print("[bold cyan][YATA][/bold cyan]\nFindings:")
+    console.print(".yata/scans/\n")
+    console.print("[bold cyan][YATA][/bold cyan]\nLogs:")
+    console.print(".yata/logs/\n")
+
     current_root = target_root
     round_reports: list[dict] = []
     remaining_findings: list[VulnerabilityFinding] = []
@@ -141,6 +191,10 @@ def _run_repository(
     battle_status = "complete"
     termination_reason = "No referee-verified vulnerabilities remain."
     patches_generated = 0
+    patch_applied = False
+
+    # Store vulnerability findings tracking
+    all_findings: dict[tuple, dict] = {}
 
     for round_number in range(1, max_rounds + 1):
         console.print(Panel.fit(f"[bold magenta]{repository_root.name} :: Round {round_number}[/bold magenta]"))
@@ -149,6 +203,18 @@ def _run_repository(
         findings = red_agent.scan(current_root)
         for finding in findings:
             discovered_findings.add(_finding_key(finding))
+            
+            key = _finding_key(finding)
+            if key not in all_findings:
+                rel_file = finding.metadata.get("relative_file", finding.affected_file)
+                all_findings[key] = {
+                    "vulnerability_type": finding.vulnerability_type,
+                    "file": str(rel_file),
+                    "line_number": finding.line_number,
+                    "severity": finding.severity,
+                    "status": "active"
+                }
+
         remaining_findings = findings
         score_before = referee.calculate_security_score(findings)
 
@@ -181,10 +247,40 @@ def _run_repository(
         patch_succeeded = not patched_check.attack_succeeded
 
         if patch_succeeded:
+            console.print("[bold blue][BLUE][/bold blue]")
+            console.print("Patch verified.\n")
+
+            # Update findings status to patched
+            all_findings[_finding_key(finding)]["status"] = "patched"
+
+            # In all modes, store ONLY modified/patched files in .yata/patches/
+            for relative_path in patch_result.changed_files:
+                relative = Path(relative_path)
+                source_path = patch_result.patched_root / relative
+                destination_path = patches_dir / relative
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, destination_path)
+
+            apply_verified = False
             if mode == "apply":
+                apply_verified = True
+            elif mode == "interactive":
+                console.print()
+                try:
+                    response = input("Apply verified patch to original repository? [Y/N]: ").strip().upper()
+                except (KeyboardInterrupt, EOFError):
+                    response = "N"
+                if response in ("Y", "YES"):
+                    apply_verified = True
+
+            if apply_verified:
+                console.print("[bold cyan][YATA][/bold cyan]")
+                console.print("Applying verified patch to original repository...\n")
                 _apply_patch_to_original(target_root, patch_result)
                 current_root = target_root
-                console.print("[green][BLUE] Verified patch applied to the original repository.[/green]")
+                patch_applied = True
+                console.print("[bold cyan][YATA][/bold cyan]")
+                console.print("Repository healed successfully.")
             else:
                 current_root = patch_result.patched_root
 
@@ -237,10 +333,14 @@ def _run_repository(
         termination_reason = f"Reached max round limit ({max_rounds}) before the system became clean."
         console.print("[yellow][REFEREE] Maximum rounds reached before the battle fully converged.[/yellow]")
 
+    verification_result = "Passed" if battle_status == "complete" and not remaining_findings else "Failed"
     final_score = referee.calculate_security_score(remaining_findings)
     report = report_generator.build_report(
         repository_name=repository_root.name,
         mode=mode,
+        patch_mode=mode.upper(),
+        patch_applied_to_original="Yes" if patch_applied else "No",
+        verification_result=verification_result,
         target_root=target_root,
         final_root=current_root,
         battle_status=battle_status,
@@ -257,6 +357,24 @@ def _run_repository(
     report_paths = report_generator.write_reports(report)
     console.print("[bold cyan][YATA] Repository cycle finished[/bold cyan]")
     console.print(json.dumps(report_paths, indent=2))
+
+    # Write scans/findings.json database
+    findings_data = []
+    for f in all_findings.values():
+        findings_data.append({
+            "vulnerability_type": f["vulnerability_type"],
+            "file": f["file"],
+            "line_number": f["line_number"],
+            "severity": f["severity"],
+            "status": f["status"]
+        })
+    findings_file = scans_dir / "findings.json"
+    findings_file.write_text(json.dumps(findings_data, indent=2), encoding="utf-8")
+
+    # Write logs/run_YYYY-MM-DD.log
+    log_content = console.export_text()
+    log_file = logs_dir / f"run_{datetime.now().strftime('%Y-%m-%d')}.log"
+    log_file.write_text(log_content, encoding="utf-8")
 
     verification_result = "Passed" if battle_status == "complete" and not remaining_findings else "Failed"
     return RepositoryRunSummary(
