@@ -1,0 +1,11 @@
+{
+  "sql_injection": {
+    "method": "GET",
+    "path": "/admin/audit",
+    "params": {
+      "squad": "__PAYLOAD__"
+    },
+    "success_contains": "Admin row",
+    "success_status_code": 200
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "sql_injection": {
+    "method": "GET",
+    "path": "/members/lookup",
+    "params": {
+      "nickname": "__PAYLOAD__"
+    },
+    "success_contains": "Member profile",
+    "success_status_code": 200
+  }
+}

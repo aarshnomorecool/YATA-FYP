@@ -1,0 +1,19 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Databases
+*.db
+
+# Reports
+reports/
+
+# Temp
+temp/
+tmp/

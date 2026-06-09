@@ -1,0 +1,12 @@
+{
+  "sql_injection": {
+    "method": "POST",
+    "path": "/session/start",
+    "params": {
+      "handle": "__PAYLOAD__",
+      "passcode": "irrelevant"
+    },
+    "success_contains": "Access granted",
+    "success_status_code": 200
+  }
+}

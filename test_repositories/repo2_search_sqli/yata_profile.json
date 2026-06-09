@@ -1,0 +1,11 @@
+{
+  "sql_injection": {
+    "method": "GET",
+    "path": "/catalog/search",
+    "params": {
+      "phrase": "__PAYLOAD__"
+    },
+    "success_contains": "Search hit",
+    "success_status_code": 200
+  }
+}
