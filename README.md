@@ -1,129 +1,182 @@
-# YATA (Yata no Kagami)
+# YATA — Yet Another Threat Antagonist
 
-YATA is a terminal-first autonomous cyber immune system for educational and defensive security hardening in Python applications.
+> An autonomous agent that attacks your codebase, patches every vulnerability it finds, then tries to break its own fixes. No human required.
 
-## What it does
+```
+git clone <repository-url> && cd yata
+pip install -r requirements.txt
+python yata.py --demo
+```
 
-- Runs an adversarial `HUNTER -> HEALER -> VALIDATOR` loop in rounds.
-- Analyzes Python source for SQL injection and hardcoded-secret patterns using local rules.
-- Generates a proof-of-concept payload and attack-path explanation.
-- Verifies runtime exploits and source-level credential exposure before any patch is accepted.
-- Uses NVIDIA-hosted `qwen/qwen3-next-80b-a3b-instruct` when available for reasoning and patch suggestions.
-- Supports safe-copy validation mode and apply mode for verified self-healing.
-- Repeats the cycle until no verified vulnerabilities remain or a round limit is reached.
-- Can assess one repository or an entire directory of repositories and prints a summary table for the whole suite.
-- Generates JSON + Markdown security assessment reports with round history and score changes.
+---
 
-## Project Structure
+## What YATA Does
 
-- `yata.py` orchestrates the multi-round cyber defense battle.
-- `red_agent.py` (HUNTER) evaluates attack paths, prioritizes, and prepares attack plans.
-- `blue_agent.py` (HEALER) generates secure patches on temporary copies.
-- `verifier.py` (VALIDATOR) replays exploits and owns the security score.
-- `llm_client.py` centralizes NVIDIA-backed LLM access with fallback behavior.
-- `llm.py` remains as a thin compatibility shim.
-- `report_generator.py` writes JSON and Markdown security assessment reports.
-- `vulnerable_app/` contains the intentionally vulnerable Flask + SQLite demo app.
-- `test_repositories/` contains the multi-repository validation suite.
+Most security tools find problems. YATA fixes them.
 
-## Requirements
+YATA runs three agents in an adversarial loop against your Python repository. HUNTER breaks in. HEALER patches the breach. VALIDATOR — running the same offensive configuration as HUNTER — tries to break the patch. The loop repeats until YATA cannot defeat itself.
 
-- Python 3.12
-- Optional NVIDIA API key for LLM reasoning
-- Model: `qwen/qwen3-next-80b-a3b-instruct`
+```
+HUNTER   →  finds and exploits weaknesses
+HEALER   →  generates and applies secure patches
+VALIDATOR  →  attacks the patched code
+              ↓ if breakthrough → back to HEALER
+              ↓ if blocked      → repository secured
+```
 
-## Setup
+When the run ends, your repository is either secure or YATA tells you exactly why it isn't.
 
+---
+
+## The Adversarial Loop
+
+YATA does not scan and report. It attacks.
+
+```
+[HUNTER]    Evaluating attack paths...
+              └─ SQL payloads loaded: 7
+              └─ Trying payload 1/7 ... FAIL
+              └─ Trying payload 2/7 ... FAIL
+              └─ Trying payload 3/7 ... SUCCESS ✓
+              └─ Payload: ' OR '1'='1
+
+[HEALER]    Generating secure patch...
+              └─ Vulnerability confirmed by HUNTER
+              └─ Patch written → .yata/patches/login.py
+
+[VALIDATOR] Attacking patched code...
+              └─ Re-attempting SQL injection ... BLOCKED ✓
+              └─ Security score: 23 → 91
+
+YATA complete. Repository secured.
+Human interventions: 0
+```
+
+Every finding is proven exploitable before a patch is generated. Every patch is attacked before it is accepted.
+
+---
+
+## Agents
+
+| Agent | Role | Behaviour |
+|---|---|---|
+| HUNTER | Offensive | Aggressive. Tries every payload. Confirms exploitability before reporting. |
+| HEALER | Defensive | Conservative. Writes minimal patches. Critiques its own output before committing. |
+| VALIDATOR | Adversarial | Identical configuration to HUNTER. Attacks the patched code with fresh reasoning. |
+
+HUNTER and VALIDATOR share the same offensive configuration. A patch does not pass until VALIDATOR — thinking exactly like HUNTER — cannot break it.
+
+---
+
+## Quick Start
+
+**Clone and install:**
 ```bash
+git clone <repository-url>
+cd yata
 python -m venv .venv
+
+# Windows
 .venv\Scripts\activate
+
+# Linux / macOS
+source .venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
-Create a `.env` file from `.env.example` if you want NVIDIA-backed reasoning:
-
-```bash
-copy .env.example .env
-```
-
-If the API key is missing or the NVIDIA call fails, YATA falls back to deterministic local behavior so the remediation loop still works.
-
-If you still have `qwen/qwen2.5-coder-32b-instruct` or `qwen/qwen3-coder-480b-a35b-instruct` in your local `.env`, YATA will automatically retry with `qwen/qwen3-next-80b-a3b-instruct`.
-
-## Run
-
-To run on a target repository, you can specify one of the mode flags, or run without flags to launch the interactive arrow-key mode selector:
-
-Single repository, safe mode:
-
-```bash
-python yata.py assess vulnerable_app --safe
-```
-
-Single repository, apply mode:
-
-```bash
-python yata.py assess vulnerable_app --apply
-```
-
-Assess the full validation suite:
-
-```bash
-python yata.py assess test_repositories --safe
-```
-
-Demo mode (zero setup, self-contained, resets automatically):
-
+**Run the demo (no API key required):**
 ```bash
 python yata.py --demo
 ```
 
-Backward-compatible invocation also still works:
-
+**Run against your own repository:**
 ```bash
-python yata.py vulnerable_app
+python yata.py
 ```
 
-Expected terminal flow:
+Select a mode, provide a path, and YATA handles the rest.
 
-```text
-[HUNTER] Evaluating attack paths for SQL Injection...
- └─ Payloads loaded: 3
- └─ Payload 1/3 FAIL
- └─ Payload 2/3 FAIL
- └─ Payload 3/3 SUCCESS ✓
-[HUNTER] Prioritized weakness: SQL Injection
- └─ Severity:  CRITICAL
- └─ Location:  app.py:38
- └─ OWASP:     A03:2021 – Injection
- └─ CWE:       CWE-89
- └─ Impact:    Authentication bypass, Data exfiltration
- └─ Payload:   ' OR '1'='1' -- 
-[VALIDATOR] Vulnerability verified: Runtime exploit reproduced against /login...
-[HEALER] Generating secure patch...
- └─ Patch written → .yata/patches/app.py
-[VALIDATOR] Attacking patched code...
- └─ Exploit blocked ✓
-[HEALER] Patch verified.
+---
+
+## Modes
+
+```
+> SAFE          patched copy created, original untouched
+  APPLY         verified patch applied directly to original
+  INTERACTIVE   approve or reject each patch individually
 ```
 
-## Output
+All three modes run the full adversarial loop. The only difference is what happens to your files after a patch passes VALIDATOR.
 
-Reports are written to `.yata/reports/` as both JSON and Markdown, including:
+---
 
-- Round-by-round attack, patch, and verifier verdicts
-- Security score changes owned by the verifier
-- Remaining findings at the end of the run
-- Capability matrices showing the current SQL injection and hardcoded-secret implementation plus extension points for XSS, command injection, and path traversal
+## Workspace
 
-When assessing a directory of repositories, YATA also prints a security assessment summary table with:
+Every scanned repository gets a `.yata/` directory:
 
-- Repository Name
-- Vulnerabilities Found
-- Patches Generated
-- Verification Result
-- Security Score
+```
+your-repo/
+└── .yata/
+    ├── patches/        verified patch files
+    ├── reports/        run reports (terminal + HTML)
+    ├── scans/          findings.json with full attack history
+    └── logs/           execution logs per run
+```
 
-In `--safe` mode, patched repositories stay in temporary directories (`.yata/sandbox/`) and the original source tree is never overwritten.
+`findings.json` stores every payload attempted, the winning payload, and the patch that blocked it. Nothing is discarded.
 
-In `--apply` mode, YATA verifies the patch on a safe copy first and then applies only the verified file changes back to the original repository.
+---
+
+## Coverage
+
+| Vulnerability | Detect | Exploit | Patch | Verify | OWASP |
+|---|:---:|:---:|:---:|:---:|---|
+| SQL Injection | ✅ | ✅ | ✅ | ✅ | A03:2021 · CWE-89 |
+| Hardcoded Secrets | ✅ | ✅ | ✅ | ✅ | A02:2021 · CWE-798 |
+| Command Injection | 🔜 | 🔜 | 🔜 | 🔜 | A03:2021 · CWE-78 |
+| Path Traversal | 🔜 | 🔜 | 🔜 | 🔜 | A01:2021 · CWE-22 |
+
+YATA covers full detect–exploit–patch–verify cycles. Detection without exploitation is not a finding.
+
+---
+
+## LLM Configuration
+
+YATA uses `qwen/qwen3-next-80b-a3b-instruct` via NVIDIA NIM by default.
+
+To enable it:
+```bash
+cp .env.example .env
+# add your NVIDIA API key
+```
+
+If no key is present, YATA falls back to deterministic local behaviour automatically. Demo mode requires no configuration.
+
+---
+
+## Roadmap
+
+- [x] SQL Injection
+- [x] Hardcoded Secrets
+- [x] Multi-payload attack library
+- [x] Adversarial validation loop
+- [x] Workspace architecture
+- [x] Demo mode
+- [ ] Command Injection
+- [ ] Path Traversal
+- [ ] Cross-Site Scripting
+- [ ] Repository memory and learning
+- [ ] GitHub PR automation
+
+---
+
+## FAR AWAY 2026
+
+YATA is submitted under the **Agentic & Autonomous Systems** theme.
+
+The core claim: a security agent that is only as trustworthy as its ability to defeat itself. YATA does not accept a patch until its own offensive reasoning cannot break it.
+
+---
+
+*Built by Team Seasaw.*
