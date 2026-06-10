@@ -4,6 +4,8 @@ import argparse
 import json
 import shutil
 import sys
+import time
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +23,80 @@ from verifier import Referee, VerificationResult
 console = Console()
 
 
+VULNERABILITY_MAPPING = {
+    "SQL Injection": {
+        "owasp": "A03:2021 – Injection",
+        "cwe": "CWE-89",
+        "impact": "Authentication bypass, Data exfiltration",
+        "severity": "CRITICAL",
+    },
+    "Hardcoded Secret": {
+        "owasp": "A02:2021 – Cryptographic Failures",
+        "cwe": "CWE-798",
+        "impact": "Credential exposure, Access compromise",
+        "severity": "HIGH",
+    },
+    "Cross-Site Scripting": {
+        "owasp": "A03:2021 – Injection",
+        "cwe": "CWE-79",
+        "impact": "Session hijacking, Client-side code execution",
+        "severity": "MEDIUM",
+    },
+    "Command Injection": {
+        "owasp": "A03:2021 – Injection",
+        "cwe": "CWE-78",
+        "impact": "Remote code execution, Full system takeover",
+        "severity": "CRITICAL",
+    },
+    "Path Traversal": {
+        "owasp": "A05:2021 – Security Misconfiguration",
+        "cwe": "CWE-22",
+        "impact": "Arbitrary file read, Information disclosure",
+        "severity": "MEDIUM",
+    }
+}
+
+
+def _clean_path(path: object) -> str:
+    path_str = str(path).replace("\\", "/")
+    if "yata_patched_" in path_str:
+        parts = path_str.split("/")
+        for i, part in enumerate(parts):
+            if "yata_patched_" in part:
+                return ".yata/sandbox/" + "/".join(parts[i+1:])
+    return path_str
+
+
+def _robust_rmtree(path: Path) -> bool:
+    import os
+    import stat
+    import time
+
+    def remove_readonly(func, file_path, exc_info):
+        try:
+            os.chmod(file_path, stat.S_IWRITE)
+            func(file_path)
+        except Exception:
+            pass
+
+    if not path.exists():
+        return True
+
+    for attempt in range(5):
+        try:
+            try:
+                shutil.rmtree(path, onexc=remove_readonly)
+            except TypeError:
+                shutil.rmtree(path, onerror=remove_readonly)
+            if not path.exists():
+                return True
+        except Exception:
+            pass
+        time.sleep(0.1)
+
+    return not path.exists()
+
+
 @dataclass(slots=True)
 class RepositoryRunSummary:
     repository_name: str
@@ -34,25 +110,85 @@ class RepositoryRunSummary:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    target_path = Path(args.target).resolve()
-    if not target_path.exists():
-        console.print(f"[red]Target path does not exist:[/red] {target_path}")
-        return 1
+
+    banner = """
+██╗   ██╗ █████╗ ████████╗ █████╗ 
+╚██╗ ██╔╝██╔══██╗╚══██╔══╝██╔══██╗
+ ╚████╔╝ ███████║   ██║   ███████║
+  ╚██╔╝  ██╔══██║   ██║   ██╔══██║
+   ██║   ██║  ██║   ██║   ██║  ██║
+   ╚═╝   ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝
+"""
+    splash_text = (
+        f"[bold red]{banner}[/bold red]\n"
+        f"[bold white]       YATA (Yet Another Threat Antagonist)[/bold white]\n"
+        f"        [dim]Autonomous Cyber Defense & Patching Agent[/dim]\n"
+    )
+    console.print(Panel(splash_text, border_style="bold red", expand=False))
 
     if args.max_rounds < 1:
         console.print("[red]--max-rounds must be at least 1[/red]")
         return 1
 
+    if args.demo:
+        src_demo = Path(__file__).resolve().parent / "test_repositories" / "repo5_mixed"
+        dest_demo = Path(__file__).resolve().parent / "demo_repo5_mixed"
+        
+        if not _robust_rmtree(dest_demo):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            dest_demo = Path(__file__).resolve().parent / f"demo_repo5_mixed_{timestamp}"
+            _robust_rmtree(dest_demo)
+            
+        shutil.copytree(
+            src_demo,
+            dest_demo,
+            ignore=shutil.ignore_patterns(".yata", ".git", ".venv", "__pycache__")
+        )
+        
+        target_path = dest_demo
+        args.mode = "safe"
+    else:
+        if args.mode is None:
+            try:
+                from InquirerPy import inquirer
+                mode_choices = [
+                    {"name": "SAFE (Patched copy only)", "value": "safe"},
+                    {"name": "APPLY (Apply verified patches automatically)", "value": "apply"},
+                    {"name": "INTERACTIVE (User approves each patch)", "value": "interactive"}
+                ]
+                args.mode = inquirer.select(
+                    message="Select execution mode:",
+                    choices=mode_choices,
+                    default="safe"
+                ).execute()
+            except Exception:
+                console.print("[yellow]Non-interactive terminal detected or menu selection failed. Defaulting to SAFE mode.[/yellow]")
+                args.mode = "safe"
+
+        if args.target is None:
+            try:
+                from InquirerPy import inquirer
+                args.target = inquirer.text(
+                    message="Enter repository path:",
+                    default="."
+                ).execute()
+            except Exception:
+                args.target = "."
+
+        target_path = Path(args.target).resolve()
+        if not target_path.exists():
+            console.print(f"[red]Target path does not exist:[/red] {target_path}")
+            return 1
+
     repository_roots = _resolve_repository_roots(target_path)
     console.print(
         Panel.fit(
-            f"[bold cyan][YATA] Autonomous Scan Started[/bold cyan]\n"
-            f"[white]Target:[/white] {target_path}\n"
+            f"[bold cyan][YATA] Autonomous Security Assessment Started[/bold cyan]\n"
+            f"[white]Target:[/white] {_clean_path(target_path)}\n"
             f"[white]Repositories:[/white] {len(repository_roots)}\n"
-            f"[white]Mode:[/white] {args.mode}"
+            f"[white]Mode:[/white] {args.mode.upper()}"
         )
     )
-    console.print(f"[bold cyan][YATA][/bold cyan]\nMode: {args.mode.upper()}")
 
     red_agent = RedAgent()
     blue_agent = BlueAgent()
@@ -76,19 +212,23 @@ def main(argv: list[str] | None = None) -> int:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     raw_args = list(sys.argv[1:] if argv is None else argv)
-    if raw_args and raw_args[0] != "scan":
-        raw_args = ["scan", *raw_args]
+    if raw_args and raw_args[0] not in ("scan", "assess"):
+        raw_args = ["assess", *raw_args]
+    elif not raw_args:
+        raw_args = ["assess"]
 
-    parser = argparse.ArgumentParser(description="YATA - Yata no Kagami autonomous cyber immune system")
+    parser = argparse.ArgumentParser(description="YATA - Yet Another Threat Antagonist autonomous cyber immune system")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    scan_parser = subparsers.add_parser("scan", help="Scan one repository or a directory of repositories")
-    scan_parser.add_argument("target", help="Repository path or a directory containing repositories")
-    mode_group = scan_parser.add_mutually_exclusive_group()
+    assess_parser = subparsers.add_parser("assess", aliases=["scan"], help="Assess one repository or a directory of repositories")
+    assess_parser.add_argument("target", nargs="?", default=None, help="Repository path or a directory containing repositories")
+    assess_parser.add_argument("--demo", action="store_true", help="Run in demo mode with bundled repositories")
+    
+    mode_group = assess_parser.add_mutually_exclusive_group()
     mode_group.add_argument("--safe", action="store_true", help="Patch and verify on safe copies only")
-    mode_group.add_argument("--apply", action="store_true", help="Apply verified patches back to the original repository")
-    mode_group.add_argument("--interactive", action="store_true", help="Ask user before applying verified patches back to the original repository")
-    scan_parser.add_argument(
+    mode_group.add_argument("--apply", action="store_true", help="Apply verified patches automatically")
+    mode_group.add_argument("--interactive", action="store_true", help="User approves each patch")
+    assess_parser.add_argument(
         "--max-rounds",
         type=int,
         default=5,
@@ -96,12 +236,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     args = parser.parse_args(raw_args)
+
     if getattr(args, "apply", False):
         args.mode = "apply"
     elif getattr(args, "interactive", False):
         args.mode = "interactive"
-    else:
+    elif getattr(args, "safe", False):
         args.mode = "safe"
+    else:
+        args.mode = None
     return args
 
 
@@ -136,69 +279,64 @@ def _run_repository(
     global console
     console = Console(record=True)
 
+    start_time = time.time()
+
     console.print(
         Panel.fit(
             f"[bold cyan]Repository: {repository_root.name}[/bold cyan]\n"
-            f"[white]Path:[/white] {repository_root}"
+            f"[white]Path:[/white] {_clean_path(repository_root)}"
         )
     )
 
     referee = Referee()
     target_root = repository_root.resolve()
 
-    # Resolve workspace paths
     yata_dir = target_root / ".yata"
     reports_dir = yata_dir / "reports"
     patches_dir = yata_dir / "patches"
-    scans_dir = yata_dir / "scans"
+    analysis_dir = yata_dir / "analysis"
     logs_dir = yata_dir / "logs"
 
-    # Initialize workspace subdirectories
     yata_dir.mkdir(exist_ok=True)
     reports_dir.mkdir(exist_ok=True)
     patches_dir.mkdir(exist_ok=True)
-    scans_dir.mkdir(exist_ok=True)
+    analysis_dir.mkdir(exist_ok=True)
     logs_dir.mkdir(exist_ok=True)
 
-    # Initialize metadata file
     metadata_file = yata_dir / "metadata.json"
     metadata_content = {
-        "version": "0.3.1",
+        "version": "0.4.1",
         "workspace_initialized": True,
         "created_by": "YATA"
     }
     metadata_file.write_text(json.dumps(metadata_content, indent=2), encoding="utf-8")
 
-    # Override report generator reports root
     report_generator.reports_root = reports_dir
 
-    # Print user-friendly workspace terminal output
-    console.print("[bold cyan][YATA][/bold cyan]\nWorkspace initialized:")
-    console.print(f"{yata_dir}\n")
-    console.print("[bold cyan][YATA][/bold cyan]\nReports:")
-    console.print(".yata/reports/\n")
-    console.print("[bold cyan][YATA][/bold cyan]\nPatched Files:")
-    console.print(".yata/patches/\n")
-    console.print("[bold cyan][YATA][/bold cyan]\nFindings:")
-    console.print(".yata/scans/\n")
-    console.print("[bold cyan][YATA][/bold cyan]\nLogs:")
-    console.print(".yata/logs/\n")
+    console.print("[bold cyan][YATA][/bold cyan] Workspace initialized at:")
+    console.print(f"  {_clean_path(yata_dir)}")
+    console.print("[bold cyan][YATA][/bold cyan] Reports:             .yata/reports/")
+    console.print("[bold cyan][YATA][/bold cyan] Patched Files:       .yata/patches/")
+    console.print("[bold cyan][YATA][/bold cyan] Security Assessment: .yata/analysis/")
+    console.print("[bold cyan][YATA][/bold cyan] Logs:                .yata/logs/\n")
 
     current_root = target_root
     round_reports: list[dict] = []
     remaining_findings: list[VulnerabilityFinding] = []
     discovered_findings: set[tuple[str, str, int, str]] = set()
     battle_status = "complete"
-    termination_reason = "No referee-verified vulnerabilities remain."
+    termination_reason = "No validator-verified weaknesses remain."
     patches_generated = 0
+    healed_count = 0
     patch_applied = False
 
-    # Store vulnerability findings tracking
     all_findings: dict[tuple, dict] = {}
 
+    score_before_all = 100
+
     for round_number in range(1, max_rounds + 1):
-        console.print(Panel.fit(f"[bold magenta]{repository_root.name} :: Round {round_number}[/bold magenta]"))
-        console.print("[bold red][RED][/bold red] Searching for additional weaknesses...")
+        console.print(Panel(f"[bold magenta]Assessment Round {round_number}[/bold magenta]", border_style="magenta", expand=False))
+        console.print("[bold red][HUNTER][/bold red] Evaluating attack paths...")
 
         findings = red_agent.scan(current_root)
         for finding in findings:
@@ -212,48 +350,68 @@ def _run_repository(
                     "file": str(rel_file),
                     "line_number": finding.line_number,
                     "severity": finding.severity,
-                    "status": "active"
+                    "status": "active",
+                    "payloads_attempted": [],
+                    "winning_payload": None,
+                    "attack_success": False
                 }
 
         remaining_findings = findings
         score_before = referee.calculate_security_score(findings)
+        if round_number == 1:
+            score_before_all = score_before
 
         if not findings:
-            console.print("[green][REFEREE] No verified weaknesses remain. Autonomous cycle complete.[/green]")
+            console.print("[bold green][VALIDATOR][/bold green] Repository is clean. No further weaknesses found.")
             break
 
-        selection = _select_verified_attack(red_agent, referee, current_root, findings)
+        selection = _select_verified_attack(red_agent, referee, current_root, findings, all_findings)
         if selection is None:
             battle_status = "stalled"
-            termination_reason = "Detectors found suspicious code, but the referee could not reproduce an exploit."
-            console.print("[yellow][REFEREE] No candidate exploit could be reproduced. Battle halted.[/yellow]")
+            termination_reason = "Detectors flagged suspicious patterns, but VALIDATOR could not reproduce an exploit."
+            console.print("[bold yellow][VALIDATOR][/bold yellow] Weakness could not be exploited. Halting cycle.")
             break
 
         finding, attack_plan, vulnerable_check = selection
-        console.print(
-            f"[red][RED][/red] {finding.vulnerability_type} prioritized at "
-            f"{finding.metadata.get('relative_file', finding.affected_file)}:{finding.line_number}"
-        )
-        console.print(f"[red][RED][/red] Payload prepared: {attack_plan.payload}")
-        console.print(f"[green][REFEREE] Attack succeeded.[/green] {vulnerable_check.evidence}")
-        console.print("[bold blue][BLUE][/bold blue] Generating patch on a safe copy...")
+
+        mapping = VULNERABILITY_MAPPING.get(finding.vulnerability_type, {})
+        severity = mapping.get("severity", finding.severity).upper()
+        severity_colors = {
+            "CRITICAL": "bold red",
+            "HIGH": "bold red",
+            "MEDIUM": "bold yellow",
+            "LOW": "bold blue"
+        }
+        sev_color = severity_colors.get(severity, "bold white")
+        
+        console.print(f"[bold red][HUNTER][/bold red] Prioritized weakness: [bold cyan]{finding.vulnerability_type}[/bold cyan]")
+        console.print(f" └─ Severity:  [{sev_color}]{severity}[/{sev_color}]")
+        console.print(f" └─ Location:  {_clean_path(finding.metadata.get('relative_file', finding.affected_file))}:{finding.line_number}")
+        console.print(f" └─ OWASP:     {mapping.get('owasp', 'N/A')}")
+        console.print(f" └─ CWE:       {mapping.get('cwe', 'N/A')}")
+        impact_str = ", ".join(mapping.get('impact', 'N/A').split(", "))
+        console.print(f" └─ Impact:    {impact_str}")
+        console.print(f" └─ Payload:   [cyan]{attack_plan.payload}[/cyan]")
+        console.print(f"[bold green][VALIDATOR][/bold green] Vulnerability verified: {vulnerable_check.evidence}")
+
+        console.print("[bold blue][HEALER][/bold blue] Generating secure patch...")
 
         patch_result = blue_agent.generate_patch(current_root, finding)
         patches_generated += 1
-        console.print(f"[green][BLUE][/green] Patch staged: {patch_result.patched_file}")
-        console.print("[bold cyan][REFEREE][/bold cyan] Retesting patched candidate...")
+        rel_patch_path = Path(".yata/patches") / Path(patch_result.patched_file).name
+        console.print(f" └─ Patch written → {rel_patch_path}")
+        console.print("[bold cyan][VALIDATOR][/bold cyan] Attacking patched code...")
 
         patched_check = referee.verify_exploit(patch_result.patched_root, finding, attack_plan.payload)
         patch_succeeded = not patched_check.attack_succeeded
 
         if patch_succeeded:
-            console.print("[bold blue][BLUE][/bold blue]")
-            console.print("Patch verified.\n")
+            console.print(" └─ Exploit blocked ✓")
+            console.print("[bold blue][HEALER][/bold blue] Patch verified.\n")
+            healed_count += 1
 
-            # Update findings status to patched
             all_findings[_finding_key(finding)]["status"] = "patched"
 
-            # In all modes, store ONLY modified/patched files in .yata/patches/
             for relative_path in patch_result.changed_files:
                 relative = Path(relative_path)
                 source_path = patch_result.patched_root / relative
@@ -274,25 +432,24 @@ def _run_repository(
                     apply_verified = True
 
             if apply_verified:
-                console.print("[bold cyan][YATA][/bold cyan]")
-                console.print("Applying verified patch to original repository...\n")
+                console.print("[bold cyan][YATA][/bold cyan] Applying verified patch to original repository...\n")
                 _apply_patch_to_original(target_root, patch_result)
                 current_root = target_root
                 patch_applied = True
-                console.print("[bold cyan][YATA][/bold cyan]")
-                console.print("Repository healed successfully.")
+                console.print("[bold cyan][YATA][/bold cyan] Repository healed successfully.")
             else:
                 current_root = patch_result.patched_root
 
             remaining_findings = red_agent.scan(current_root)
             for next_finding in remaining_findings:
                 discovered_findings.add(_finding_key(next_finding))
-            console.print("[green][REFEREE] Exploit blocked. Patch promoted to the next round.[/green]")
+            console.print("[bold green][VALIDATOR][/bold green] Patch verification successful. Changes promoted.")
         else:
             remaining_findings = findings
             battle_status = "stalled"
             termination_reason = "The patched copy still allowed the exploit."
-            console.print("[red][REFEREE] Exploit still works after patching. Battle halted.[/red]")
+            console.print(" └─ Exploit succeeded ✗")
+            console.print("[bold red][VALIDATOR][/bold red] Patch verification failed. Exploit bypass found.")
 
         score_after = referee.calculate_security_score(remaining_findings)
         round_score = referee.record_round(
@@ -304,7 +461,7 @@ def _run_repository(
             score_after=score_after,
         )
         console.print(
-            f"[cyan][REFEREE] Security score:[/cyan] {round_score.score_before} -> "
+            f"[bold cyan][VALIDATOR][/bold cyan] Security score updated: {round_score.score_before} -> "
             f"{round_score.score_after} ({round_score.score_delta:+d})"
         )
 
@@ -331,7 +488,7 @@ def _run_repository(
             discovered_findings.add(_finding_key(finding))
         battle_status = "max_rounds_reached"
         termination_reason = f"Reached max round limit ({max_rounds}) before the system became clean."
-        console.print("[yellow][REFEREE] Maximum rounds reached before the battle fully converged.[/yellow]")
+        console.print("[bold yellow][VALIDATOR][/bold yellow] Maximum rounds reached before the repository became clean.")
 
     verification_result = "Passed" if battle_status == "complete" and not remaining_findings else "Failed"
     final_score = referee.calculate_security_score(remaining_findings)
@@ -349,32 +506,53 @@ def _run_repository(
         remaining_findings=remaining_findings,
         rounds=round_reports,
         capability_matrix={
-            "RED": red_agent.capability_matrix(),
-            "BLUE": blue_agent.capability_matrix(),
-            "REFEREE": referee.capability_matrix(),
+            "HUNTER": red_agent.capability_matrix(),
+            "HEALER": blue_agent.capability_matrix(),
+            "VALIDATOR": referee.capability_matrix(),
         },
     )
     report_paths = report_generator.write_reports(report)
-    console.print("[bold cyan][YATA] Repository cycle finished[/bold cyan]")
-    console.print(json.dumps(report_paths, indent=2))
 
-    # Write scans/findings.json database
     findings_data = []
     for f in all_findings.values():
+        mapping = VULNERABILITY_MAPPING.get(f["vulnerability_type"], {
+            "owasp": "N/A",
+            "cwe": "N/A",
+            "impact": "N/A",
+            "severity": f["severity"]
+        })
         findings_data.append({
             "vulnerability_type": f["vulnerability_type"],
             "file": f["file"],
             "line_number": f["line_number"],
-            "severity": f["severity"],
-            "status": f["status"]
+            "severity": mapping["severity"],
+            "status": f["status"],
+            "owasp": mapping["owasp"],
+            "cwe": mapping["cwe"],
+            "impact": mapping["impact"],
+            "payloads_attempted": f["payloads_attempted"],
+            "winning_payload": f["winning_payload"],
+            "attack_success": f["attack_success"]
         })
-    findings_file = scans_dir / "findings.json"
+    findings_file = analysis_dir / "security_assessment.json"
     findings_file.write_text(json.dumps(findings_data, indent=2), encoding="utf-8")
 
-    # Write logs/run_YYYY-MM-DD.log
     log_content = console.export_text()
     log_file = logs_dir / f"run_{datetime.now().strftime('%Y-%m-%d')}.log"
     log_file.write_text(log_content, encoding="utf-8")
+
+    elapsed_time = int(time.time() - start_time)
+    _print_security_assessment_card(
+        repository_root.name,
+        score_before_all,
+        final_score,
+        healed_count,
+        elapsed_time
+    )
+
+    console.print("[bold cyan][YATA] Security assessment complete.[/bold cyan]")
+    cleaned_report_paths = {k: _clean_path(v) for k, v in report_paths.items()}
+    console.print(json.dumps(cleaned_report_paths, indent=2))
 
     verification_result = "Passed" if battle_status == "complete" and not remaining_findings else "Failed"
     return RepositoryRunSummary(
@@ -393,18 +571,50 @@ def _select_verified_attack(
     referee: Referee,
     current_root: Path,
     findings: list[VulnerabilityFinding],
+    findings_tracker: dict[tuple, dict] | None = None,
 ) -> tuple[VulnerabilityFinding, AttackPlan, VerificationResult] | None:
     for finding in red_agent.prioritize(findings):
-        attack_plan = red_agent.plan_attack(finding)
-        console.print(
-            f"[bold red][RED][/bold red] Evaluating {finding.vulnerability_type} "
-            f"({Path(str(finding.metadata.get('relative_file', finding.affected_file))).name}:{finding.line_number})"
-        )
-        console.print("[bold cyan][REFEREE][/bold cyan] Replaying exploit...")
-        vulnerable_check = referee.verify_exploit(current_root, finding, attack_plan.payload)
-        if vulnerable_check.attack_succeeded:
+        payloads = red_agent.get_payloads_for_finding(finding)
+        
+        console.print(f"[bold red][HUNTER][/bold red] Evaluating attack paths for {finding.vulnerability_type}...")
+        console.print(f" └─ Payloads loaded: {len(payloads)}")
+
+        winning_payload = None
+        vulnerable_check = None
+        payloads_attempted = []
+        attack_success = False
+
+        for idx, payload in enumerate(payloads, 1):
+            payloads_attempted.append(payload)
+
+            if finding.vulnerability_type == "Hardcoded Secret" and payload != finding.exploit_payload:
+                console.print(f" └─ Payload {idx}/{len(payloads)} FAIL")
+                continue
+
+            check = referee.verify_exploit(current_root, finding, payload)
+            if check.attack_succeeded:
+                console.print(f" └─ Payload {idx}/{len(payloads)} SUCCESS ✓")
+                winning_payload = payload
+                vulnerable_check = check
+                attack_success = True
+                break
+            else:
+                console.print(f" └─ Payload {idx}/{len(payloads)} FAIL")
+
+        if findings_tracker is not None:
+            key = _finding_key(finding)
+            if key in findings_tracker:
+                findings_tracker[key].update({
+                    "payloads_attempted": payloads_attempted,
+                    "winning_payload": winning_payload,
+                    "attack_success": attack_success
+                })
+
+        if attack_success and vulnerable_check is not None and winning_payload is not None:
+            attack_plan = red_agent.plan_attack(finding, winning_payload)
             return finding, attack_plan, vulnerable_check
-        console.print("[yellow][REFEREE] Candidate did not reproduce. Continuing search.[/yellow]")
+
+        console.print("[bold yellow][VALIDATOR][/bold yellow] Weakness could not be exploited. Continuing search.")
     return None
 
 
@@ -495,8 +705,53 @@ def _finding_key(finding: VulnerabilityFinding) -> tuple[str, str, str, str]:
     )
 
 
+def _print_security_assessment_card(
+    repo_name: str,
+    score_before: int,
+    score_after: int,
+    healed_count: int,
+    elapsed_time_seconds: int
+) -> None:
+    def make_bar(score: int, color: str) -> str:
+        filled = int(score / 5)
+        empty = 20 - filled
+        return f"[{color}]" + "█" * filled + f"[dim]" + "░" * empty + f"[/dim] ({score}/100)"
+
+    def get_status(score: int) -> tuple[str, str]:
+        if score == 100 or score >= 90:
+            return "SECURE", "green"
+        elif score >= 70:
+            return "MEDIUM RISK", "yellow"
+        elif score >= 40:
+            return "HIGH RISK", "red"
+        else:
+            return "CRITICAL", "bold red"
+
+    before_status, before_color = get_status(score_before)
+    after_status, after_color = get_status(score_after)
+
+    hours, remainder = divmod(elapsed_time_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    card_content = (
+        f"[bold white]REPOSITORY SECURITY ASSESSMENT[/bold white]\n"
+        f"[bold dim]──────────────────────────────────────────────[/bold dim]\n"
+        f"[bold]Repository:[/bold] {repo_name}\n\n"
+        f"[bold]BEFORE[/bold]\n"
+        f"Score: {make_bar(score_before, before_color)}  [[{before_color}]{before_status}[/{before_color}]]\n\n"
+        f"[bold]AFTER[/bold]\n"
+        f"Score: {make_bar(score_after, after_color)}  [[{after_color}]{after_status}[/{after_color}]]\n\n"
+        f"[bold dim]──────────────────────────────────────────────[/bold dim]\n"
+        f"[bold]Vulnerabilities Healed:[/bold] {healed_count}\n"
+        f"[bold]Human Interventions:[/bold]    0\n"
+        f"[bold]Time Elapsed:[/bold]           {time_str}\n"
+    )
+    console.print(Panel(card_content, border_style="cyan", expand=False))
+
+
 def _print_suite_summary(summaries: list[RepositoryRunSummary]) -> None:
-    table = Table(title="YATA Repository Summary")
+    table = Table(title="YATA Security Assessment Summary")
     table.add_column("Repository", style="cyan")
     table.add_column("Vulnerabilities Found", justify="right")
     table.add_column("Patches Generated", justify="right")

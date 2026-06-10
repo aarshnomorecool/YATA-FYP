@@ -43,7 +43,7 @@ class Referee:
     def verify_exploit(self, app_root: Path, finding: VulnerabilityFinding, payload: str) -> VerificationResult:
         verifier = getattr(self, f"_verify_{finding.vulnerability_type.lower().replace(' ', '_')}", None)
         if verifier is None:
-            raise ValueError(f"No referee strategy registered for {finding.vulnerability_type}")
+            raise ValueError(f"No validator strategy registered for {finding.vulnerability_type}")
         return verifier(app_root.resolve(), finding, payload)
 
     def calculate_security_score(self, findings: list[VulnerabilityFinding]) -> int:

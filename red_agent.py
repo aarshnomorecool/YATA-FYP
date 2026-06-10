@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from attack_library import AttackLibrary
 from llm_client import LLMClient
 
 
@@ -90,7 +91,7 @@ class SQLInjectionDetector(VulnerabilityDetector):
             findings.append(
                 VulnerabilityFinding(
                     vulnerability_type=self.vulnerability_type,
-                    severity="High",
+                    severity="CRITICAL",
                     affected_file=str(source_file),
                     line_number=vulnerable_line,
                     exploit_payload="' OR '1'='1' -- ",
@@ -314,7 +315,7 @@ class HardcodedSecretDetector(VulnerabilityDetector):
                 findings.append(
                     VulnerabilityFinding(
                         vulnerability_type=self.vulnerability_type,
-                        severity="High",
+                        severity="HIGH",
                         affected_file=str(source_file),
                         line_number=line_number,
                         exploit_payload=env_var_name,
@@ -355,6 +356,7 @@ class RedAgent:
     ) -> None:
         self.llm = llm_client or LLMClient()
         self.detectors = detectors or [SQLInjectionDetector(), HardcodedSecretDetector()]
+        self.attack_library = AttackLibrary()
 
     def scan(self, target_root: Path) -> list[VulnerabilityFinding]:
         target_root = target_root.resolve()
@@ -370,7 +372,7 @@ class RedAgent:
         return self.prioritize(findings)
 
     def prioritize(self, findings: list[VulnerabilityFinding]) -> list[VulnerabilityFinding]:
-        severity_order = {"Critical": 4, "High": 3, "Medium": 2, "Low": 1}
+        severity_order = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
         return sorted(
             findings,
             key=lambda finding: (
@@ -384,8 +386,12 @@ class RedAgent:
     def generate_exploit_payload(self, finding: VulnerabilityFinding) -> str:
         return finding.exploit_payload
 
-    def plan_attack(self, finding: VulnerabilityFinding) -> AttackPlan:
-        payload = self.generate_exploit_payload(finding)
+    def get_payloads_for_finding(self, finding: VulnerabilityFinding) -> list[str]:
+        return self.attack_library.get_payloads(finding.vulnerability_type, finding.exploit_payload)
+
+    def plan_attack(self, finding: VulnerabilityFinding, payload: str | None = None) -> AttackPlan:
+        if payload is None:
+            payload = self.generate_exploit_payload(finding)
         attack_path, fallback_explanation = self._build_attack_context(finding, payload)
         llm_response = self.llm.generate(
             system_prompt=(

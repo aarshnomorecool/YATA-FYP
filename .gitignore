@@ -19,3 +19,6 @@ reports/
 
 # Logs
 *.log
+
+# Demo workspace
+demo_repo5_mixed/

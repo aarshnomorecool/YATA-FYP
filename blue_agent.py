@@ -159,7 +159,7 @@ class HardcodedSecretPatchStrategy(PatchStrategy):
     def fallback_guidance(self) -> tuple[str, str]:
         return (
             "Mitigation: Remove the credential literal from source code and load it from an environment variable instead.",
-            "Defense Strategy: Keep secrets out of repositories, document required variables in .env.example, and continuously rescan for literals.",
+            "Defense Strategy: Keep secrets out of repositories, document required variables in .env.example, and continuously re-verify for literals.",
         )
 
     def _ensure_os_import(self, source: str) -> str:
