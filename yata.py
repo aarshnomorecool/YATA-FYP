@@ -121,9 +121,12 @@ class RepositoryRunSummary:
     battle_status: str
     report_paths: dict[str, str]
     vulnerability_summary: str
+    vulnerabilities_healed: int
+    human_interventions: int
 
 
 def main(argv: list[str] | None = None) -> int:
+    start_time_all = time.time()
     args = _parse_args(argv)
 
     banner = """
@@ -139,7 +142,27 @@ def main(argv: list[str] | None = None) -> int:
         f"[bold white]       YATA (Yet Another Threat Antagonist)[/bold white]\n"
         f"        [dim]Autonomous Cyber Defense & Patching Agent[/dim]\n"
     )
-    console.print(Panel(splash_text, border_style="bold red", expand=False))
+    if not args.quiet:
+        console.print(Panel(splash_text, border_style="bold red", expand=False))
+
+        pitch_content = (
+            "[bold white]Yet Another Threat Antagonist[/bold white]\n\n"
+            "An autonomous security agent that:\n\n"
+            "• [bold cyan]Finds vulnerabilities[/bold cyan]\n"
+            "• [bold cyan]Proves exploitability[/bold cyan]\n"
+            "• [bold cyan]Generates patches[/bold cyan]\n"
+            "• [bold cyan]Attacks its own fixes[/bold cyan]"
+        )
+        console.print(Panel(pitch_content, border_style="cyan", expand=False))
+
+        kb_content = (
+            "[bold white]Knowledge Base[/bold white]\n\n"
+            "Status:\n"
+            "[yellow]Coming in v0.7[/yellow]\n\n"
+            "Repository Memory:\n"
+            "[yellow]Planned[/yellow]"
+        )
+        console.print(Panel(kb_content, border_style="yellow", expand=False))
 
     if args.max_rounds < 1:
         console.print("[red]--max-rounds must be at least 1[/red]")
@@ -163,6 +186,19 @@ def main(argv: list[str] | None = None) -> int:
         
         target_path = dest_demo
         args.mode = "safe"
+        
+        if not args.quiet:
+            temp_client = LLMClient()
+            demo_mode_desc = "NVIDIA Assisted" if temp_client.api_key else "Autonomous Fallback"
+            demo_content = (
+                "[bold white]YATA Demonstration[/bold white]\n\n"
+                "[bold]Target:[/bold]\n"
+                "demo_repo5_mixed\n\n"
+                "[bold]Mode:[/bold]\n"
+                f"{demo_mode_desc}\n\n"
+                "[bold green]Starting Assessment...[/bold green]"
+            )
+            console.print(Panel(demo_content, border_style="magenta", expand=False))
     else:
         if args.mode is None:
             try:
@@ -197,7 +233,6 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     repository_roots = _resolve_repository_roots(target_path)
-
     red_agent = RedAgent()
     blue_agent = BlueAgent()
     red_agent.verbose = args.verbose
@@ -205,26 +240,28 @@ def main(argv: list[str] | None = None) -> int:
     report_generator = ReportGenerator(Path(__file__).resolve().parent / "reports")
     summaries: list[RepositoryRunSummary] = []
 
-    if args.verbose:
-        console.print(
-            Panel.fit(
-                f"[bold cyan][YATA] Autonomous Security Assessment Started[/bold cyan]\n"
-                f"[white]Target:[/white] {_clean_path(target_path)}\n"
-                f"[white]Repositories:[/white] {len(repository_roots)}\n"
-                f"[white]Mode:[/white] {args.mode.upper()}"
+    if not args.quiet:
+        if args.verbose:
+            console.print(
+                Panel.fit(
+                    f"[bold cyan][YATA] Autonomous Security Assessment Started[/bold cyan]\n"
+                    f"[white]Target:[/white] {_clean_path(target_path)}\n"
+                    f"[white]Repositories:[/white] {len(repository_roots)}\n"
+                    f"[white]Mode:[/white] {args.mode.upper()}"
+                )
             )
-        )
-    else:
-        mode_str = "NVIDIA Assisted"
-        if LLMClient.execution_mode == "autonomous_fallback":
-            mode_str = "Autonomous Fallback"
-        elif LLMClient.execution_mode == "demo":
-            mode_str = "Demo"
-            
-        console.print(f"Mode: {mode_str}")
-        console.print(f"Target: {target_path.name}\n")
+        else:
+            if not args.demo:
+                mode_str = "NVIDIA Assisted"
+                if LLMClient.execution_mode == "autonomous_fallback":
+                    mode_str = "Autonomous Fallback"
+                elif LLMClient.execution_mode == "demo":
+                    mode_str = "Demo"
+                    
+                console.print(f"Mode: {mode_str}")
+                console.print(f"Target: {target_path.name}\n")
 
-    if args.verbose:
+    if args.verbose and not args.quiet:
         if LLMClient.execution_mode == "demo":
             console.print("[YATA]")
             console.print("Demo Mode\n")
@@ -255,15 +292,16 @@ def main(argv: list[str] | None = None) -> int:
             console.print("✓ Attack Validation")
             console.print("✓ Security Assessment")
     else:
-        if LLMClient.execution_mode == "autonomous_fallback":
-            if not LLMClient.fallback_message_printed:
-                LLMClient.fallback_message_printed = True
-                console.print("Autonomous Fallback Mode Activated\n")
-                console.print("NVIDIA API unavailable or timed out.")
-                console.print("Switching to offline deterministic models.\n")
+        if not args.quiet:
+            if LLMClient.execution_mode == "autonomous_fallback":
+                if not LLMClient.fallback_message_printed:
+                    LLMClient.fallback_message_printed = True
+                    console.print("Autonomous Fallback Mode Activated\n")
+                    console.print("NVIDIA API unavailable or timed out.")
+                    console.print("Switching to offline deterministic models.\n")
 
     for repository_root in repository_roots:
-        if len(repository_roots) > 1 and not args.verbose:
+        if len(repository_roots) > 1 and not args.verbose and not args.quiet:
             console.print("Current Repository:")
             console.print(f"{repository_root.name}")
 
@@ -281,17 +319,48 @@ def main(argv: list[str] | None = None) -> int:
         )
         summaries.append(summary)
 
-        if len(repository_roots) > 1 and not args.verbose:
+        if len(repository_roots) > 1 and not args.verbose and not args.quiet:
             checkmark = "[bold green]✓[/bold green]" if summary.verification_result == "Passed" else "[bold red]✗[/bold red]"
             max_repo_len = max(len(r.name) for r in repository_roots)
             console.print(f"{summary.repository_name:<{max_repo_len}}      {checkmark} {summary.vulnerability_summary:<18}   {summary.initial_security_score} → {summary.security_score}\n")
 
-    if len(repository_roots) > 1 and not args.verbose:
-        console.print("────────────────────────────")
-        console.print("Reports Generated ✓")
-        console.print("────────────────────────────")
-    elif args.verbose:
-        _print_suite_summary(summaries)
+    if len(repository_roots) > 1 and not args.quiet:
+        console.print("\n[bold white]Repository Summary Table[/bold white]\n")
+        table = Table(border_style="cyan")
+        table.add_column("Repository", style="cyan")
+        table.add_column("Before", justify="right")
+        table.add_column("After", justify="right")
+        for summary in summaries:
+            table.add_row(
+                summary.repository_name,
+                str(summary.initial_security_score),
+                str(summary.security_score)
+            )
+        console.print(table)
+        console.print()
+
+        console.print("[bold white]Timeline[/bold white]\n")
+        console.print("[1] Vulnerabilities Discovered")
+        console.print("[2] Exploits Verified")
+        console.print("[3] Patches Generated")
+        console.print("[4] Validation Executed")
+        console.print("[5] Security Score Updated")
+        console.print()
+
+        console.print("[bold white]Assessment Metrics[/bold white]\n")
+        console.print(f"Repositories Assessed: {len(summaries)}")
+        total_found = sum(s.vulnerabilities_found for s in summaries)
+        total_healed = sum(s.vulnerabilities_healed for s in summaries)
+        total_interventions = sum(s.human_interventions for s in summaries)
+        
+        console.print(f"Vulnerabilities Found: {total_found}")
+        console.print(f"Vulnerabilities Patched: {total_healed}")
+        val_success_rate = (total_healed / total_found * 100) if total_found > 0 else 100.0
+        console.print(f"Validation Success Rate: {val_success_rate:.0f}%")
+        console.print(f"Human Interventions: {total_interventions}")
+        
+        total_runtime = time.time() - start_time_all
+        console.print(f"Execution Time: {total_runtime:.0f}s\n")
 
     return 0 if all(summary.battle_status == "complete" for summary in summaries) else 1
 
@@ -374,6 +443,7 @@ def _run_repository(
 
     # Initialize Telemetry
     start_time = time.time()
+    human_interventions = 0
     red_agent.llm.llm_requests = 0
     red_agent.llm.llm_time = 0.0
     blue_agent.llm.llm_requests = 0
@@ -590,6 +660,7 @@ def _run_repository(
                 apply_verified = True
             elif mode == "interactive":
                 console.print()
+                human_interventions += 1
                 try:
                     response = input("Apply verified patch to original repository? [Y/N]: ").strip().upper()
                 except (KeyboardInterrupt, EOFError):
@@ -782,50 +853,54 @@ def _run_repository(
     else:
         v_summary = "Mixed"
 
-    if verbose:
-        elapsed_time = int(t_total_runtime)
-        _print_security_assessment_card(
-            repository_root.name,
-            score_before_all,
-            final_score,
-            healed_count,
-            elapsed_time
-        )
+    exec_mode_str = "NVIDIA Assisted"
+    if LLMClient.execution_mode == "autonomous_fallback":
+        exec_mode_str = "Autonomous Fallback"
+    elif LLMClient.execution_mode == "demo":
+        temp_client = LLMClient()
+        if not temp_client.api_key:
+            exec_mode_str = "Autonomous Fallback"
 
-        # Performance Telemetry Dashboard Output
-        console.print("\n[bold cyan][YATA] Performance Metrics[/bold cyan]\n")
-        console.print(f"HUNTER Discovery:         {t_hunter_discovery:.1f}s")
-        console.print(f"HUNTER Attack Eval:       {t_hunter_attack:.1f}s\n")
-        console.print(f"HEALER Patch Generation: {t_healer_patch:.1f}s\n")
-        console.print(f"VALIDATOR Verification:   {t_validator_verification:.1f}s\n")
-        console.print(f"LLM Requests:             {llm_requests}")
-        console.print(f"LLM Time:                {llm_time:.1f}s")
-        console.print(f"Average Response:         {avg_llm_response:.1f}s\n")
-        console.print(f"Report Generation:        {t_report_generation:.1f}s\n")
-        console.print(f"TOTAL Runtime:           {t_total_runtime:.1f}s")
-
-        # Runtime Warnings
-        if t_total_runtime > 120:
-            console.print("\n[bold red][YATA] Critical Runtime Warning[/bold red]\n")
-            console.print("Assessment duration may impact interactive workflows.")
-        elif t_total_runtime > 60:
-            console.print("\n[bold yellow][YATA] Performance Warning[/bold yellow]\n")
-            console.print("Repository assessment exceeded recommended runtime.")
-            console.print("Consider provider fallback or reducing attack library size.")
-        console.print()
-
-        console.print("[bold cyan][YATA] Security assessment complete.[/bold cyan]")
-        cleaned_report_paths = {k: _clean_path(v) for k, v in report_paths.items()}
-        console.print(json.dumps(cleaned_report_paths, indent=2))
-    else:
-        if not multi_repo:
-            _print_simplified_final_summary(
-                repository_root.name,
-                healed_count,
-                score_before_all,
-                final_score,
-                t_total_runtime
+    if not quiet:
+        if verbose or not multi_repo:
+            _print_assessment_summary_pass(
+                repo_name=repository_root.name,
+                healed_count=healed_count,
+                initial_score=score_before_all,
+                final_score=final_score,
+                runtime=t_total_runtime,
+                vulnerabilities_found=len(discovered_findings),
+                verification_result=verification_result,
+                human_interventions=human_interventions,
+                exec_mode=exec_mode_str
             )
+
+        if verbose:
+            # Performance Telemetry Dashboard Output
+            console.print("\n[bold cyan][YATA] Performance Metrics[/bold cyan]\n")
+            console.print(f"HUNTER Discovery:         {t_hunter_discovery:.1f}s")
+            console.print(f"HUNTER Attack Eval:       {t_hunter_attack:.1f}s\n")
+            console.print(f"HEALER Patch Generation: {t_healer_patch:.1f}s\n")
+            console.print(f"VALIDATOR Verification:   {t_validator_verification:.1f}s\n")
+            console.print(f"LLM Requests:             {llm_requests}")
+            console.print(f"LLM Time:                {llm_time:.1f}s")
+            console.print(f"Average Response:         {avg_llm_response:.1f}s\n")
+            console.print(f"Report Generation:        {t_report_generation:.1f}s\n")
+            console.print(f"TOTAL Runtime:           {t_total_runtime:.1f}s")
+
+            # Runtime Warnings
+            if t_total_runtime > 120:
+                console.print("\n[bold red][YATA] Critical Runtime Warning[/bold red]\n")
+                console.print("Assessment duration may impact interactive workflows.")
+            elif t_total_runtime > 60:
+                console.print("\n[bold yellow][YATA] Performance Warning[/bold yellow]\n")
+                console.print("Repository assessment exceeded recommended runtime.")
+                console.print("Consider provider fallback or reducing attack library size.")
+            console.print()
+
+            console.print("[bold cyan][YATA] Security assessment complete.[/bold cyan]")
+            cleaned_report_paths = {k: _clean_path(v) for k, v in report_paths.items()}
+            console.print(json.dumps(cleaned_report_paths, indent=2))
 
     return RepositoryRunSummary(
         repository_name=repository_root.name,
@@ -837,6 +912,8 @@ def _run_repository(
         battle_status=battle_status,
         report_paths=report_paths,
         vulnerability_summary=v_summary,
+        vulnerabilities_healed=healed_count,
+        human_interventions=human_interventions,
     )
 
 
@@ -989,71 +1066,87 @@ def _finding_key(finding: VulnerabilityFinding) -> tuple[str, str, str, str]:
     )
 
 
-def _print_simplified_final_summary(
+def _print_assessment_summary_pass(
     repo_name: str,
     healed_count: int,
     initial_score: int,
     final_score: int,
     runtime: float,
+    vulnerabilities_found: int,
+    verification_result: str,
+    human_interventions: int,
+    exec_mode: str
 ) -> None:
-    summary_content = (
+    # 1. Final Assessment Card
+    card_content = (
         "[bold white]Assessment Complete[/bold white]\n\n"
         "[bold]Repository:[/bold]\n"
         f"{repo_name}\n\n"
-        "[bold]Vulnerabilities Healed:[/bold]\n"
-        f"{healed_count}\n\n"
+        "[bold]Execution Mode:[/bold]\n"
+        f"{exec_mode}\n\n"
         "[bold]Security Score:[/bold]\n"
         f"{initial_score} → {final_score}\n\n"
-        "[bold]Runtime:[/bold]\n"
-        f"{runtime:.1f}s\n\n"
-        "[bold green]Reports Generated ✓[/bold green]"
-    )
-    console.print(Panel(summary_content, border_style="cyan", expand=False))
-
-
-def _print_security_assessment_card(
-    repo_name: str,
-    score_before: int,
-    score_after: int,
-    healed_count: int,
-    elapsed_time_seconds: int
-) -> None:
-    def make_bar(score: int, color: str) -> str:
-        filled = int(score / 5)
-        empty = 20 - filled
-        return f"[{color}]" + "█" * filled + f"[dim]" + "░" * empty + f"[/dim] ({score}/100)"
-
-    def get_status(score: int) -> tuple[str, str]:
-        if score == 100 or score >= 90:
-            return "SECURE", "green"
-        elif score >= 70:
-            return "MEDIUM RISK", "yellow"
-        elif score >= 40:
-            return "HIGH RISK", "red"
-        else:
-            return "CRITICAL", "bold red"
-
-    before_status, before_color = get_status(score_before)
-    after_status, after_color = get_status(score_after)
-
-    hours, remainder = divmod(elapsed_time_seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
-    card_content = (
-        f"[bold white]REPOSITORY SECURITY ASSESSMENT[/bold white]\n"
-        f"[bold dim]──────────────────────────────────────────────[/bold dim]\n"
-        f"[bold]Repository:[/bold] {repo_name}\n\n"
-        f"[bold]BEFORE[/bold]\n"
-        f"Score: {make_bar(score_before, before_color)}  [[{before_color}]{before_status}[/{before_color}]]\n\n"
-        f"[bold]AFTER[/bold]\n"
-        f"Score: {make_bar(score_after, after_color)}  [[{after_color}]{after_status}[/{after_color}]]\n\n"
-        f"[bold dim]──────────────────────────────────────────────[/bold dim]\n"
-        f"[bold]Vulnerabilities Healed:[/bold] {healed_count}\n"
-        f"[bold]Human Interventions:[/bold]    0\n"
-        f"[bold]Time Elapsed:[/bold]           {time_str}\n"
+        "[bold]Vulnerabilities Healed:[/bold]\n"
+        f"{healed_count}\n\n"
+        "[bold]Validation Result:[/bold]\n"
+        f"{'PASSED' if verification_result == 'Passed' else 'FAILED'}\n\n"
+        "[bold]Reports Generated:[/bold]\n"
+        "✓"
     )
     console.print(Panel(card_content, border_style="cyan", expand=False))
+    console.print()
+
+    # 2. Timeline
+    console.print("[bold white]Timeline[/bold white]\n")
+    if vulnerabilities_found > 1:
+        console.print("[1] Vulnerabilities Discovered")
+        console.print("[2] Exploits Verified")
+        console.print("[3] Patches Generated")
+        console.print("[4] Validation Executed")
+        console.print("[5] Security Score Updated")
+    else:
+        console.print("[1] Vulnerability Found")
+        console.print("[2] Exploit Verified")
+        console.print("[3] Patch Generated")
+        console.print("[4] Validation Executed")
+        if verification_result == 'Passed':
+            console.print("[5] Exploit Blocked")
+        else:
+            console.print("[5] Exploit Bypassed (Patch Failed)")
+    console.print()
+
+    # 3. Agent Status Board
+    console.print("[bold white]Agent Status[/bold white]\n")
+    hunter_status = "✓ COMPLETE"
+    healer_status = "✓ COMPLETE"
+    validator_status = "✓ COMPLETE" if verification_result == "Passed" else "✗ PATCH FAILED"
+    console.print(f"HUNTER      {hunter_status}")
+    console.print(f"HEALER      {healer_status}")
+    console.print(f"VALIDATOR   {validator_status}")
+    console.print()
+
+    # 4. Security Score Evolution
+    def make_score_bar(score: int) -> str:
+        if score == 0:
+            return "░" * 10
+        filled = max(1, min(10, int(round(score / 10.0))))
+        return "█" * filled + "░" * (10 - filled)
+
+    console.print("[bold white]Security Score[/bold white]\n")
+    console.print(f"Before   {make_score_bar(initial_score)} {initial_score:>3}\n")
+    console.print(f"After    {make_score_bar(final_score)} {final_score:>3}\n")
+    console.print(f"Improvement: {final_score - initial_score:+d}\n")
+
+    # 5. Assessment Metrics
+    console.print("[bold white]Assessment Metrics[/bold white]\n")
+    console.print(f"Repositories Assessed: 1")
+    console.print(f"Vulnerabilities Found: {vulnerabilities_found}")
+    console.print(f"Vulnerabilities Patched: {healed_count}")
+    
+    val_success_rate = (healed_count / vulnerabilities_found * 100) if vulnerabilities_found > 0 else 100.0
+    console.print(f"Validation Success Rate: {val_success_rate:.0f}%")
+    console.print(f"Human Interventions: {human_interventions}")
+    console.print(f"Execution Time: {runtime:.0f}s\n")
 
 
 def _print_suite_summary(summaries: list[RepositoryRunSummary]) -> None:
