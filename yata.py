@@ -60,6 +60,18 @@ VULNERABILITY_MAPPING = {
 
 def _clean_path(path: object) -> str:
     path_str = str(path).replace("\\", "/")
+    project_root_str = str(Path(__file__).resolve().parent).replace("\\", "/")
+    if path_str.startswith(project_root_str):
+        rel = path_str[len(project_root_str):].lstrip("/")
+        if rel.startswith(".yata"):
+            return rel
+        if "yata_patched_" in path_str:
+            parts = path_str.split("/")
+            for i, part in enumerate(parts):
+                if "yata_patched_" in part:
+                    return ".yata/sandbox/" + "/".join(parts[i+1:])
+        return rel
+
     if "yata_patched_" in path_str:
         parts = path_str.split("/")
         for i, part in enumerate(parts):
@@ -105,8 +117,10 @@ class RepositoryRunSummary:
     patches_generated: int
     verification_result: str
     security_score: int
+    initial_security_score: int
     battle_status: str
     report_paths: dict[str, str]
+    vulnerability_summary: str
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -183,51 +197,76 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     repository_roots = _resolve_repository_roots(target_path)
-    console.print(
-        Panel.fit(
-            f"[bold cyan][YATA] Autonomous Security Assessment Started[/bold cyan]\n"
-            f"[white]Target:[/white] {_clean_path(target_path)}\n"
-            f"[white]Repositories:[/white] {len(repository_roots)}\n"
-            f"[white]Mode:[/white] {args.mode.upper()}"
-        )
-    )
 
     red_agent = RedAgent()
     blue_agent = BlueAgent()
+    red_agent.verbose = args.verbose
+    blue_agent.verbose = args.verbose
     report_generator = ReportGenerator(Path(__file__).resolve().parent / "reports")
     summaries: list[RepositoryRunSummary] = []
 
-    if LLMClient.execution_mode == "demo":
-        console.print("[YATA]")
-        console.print("Demo Mode\n")
-        console.print("Using Autonomous Demonstration Environment.\n")
-        console.print("AI Reasoning:")
-        console.print("Disabled")
-    elif LLMClient.execution_mode == "autonomous_fallback":
-        console.print("[YATA]")
-        console.print("Execution Mode:")
-        console.print("Autonomous Fallback\n")
-        console.print("Capabilities:")
-        console.print("✓ SQL Injection")
-        console.print("✓ Hardcoded Secret")
-        console.print("✓ Patch Verification")
-        console.print("✓ Security Assessment\n")
-        console.print("AI Reasoning:")
-        console.print("Disabled")
-        if not LLMClient.fallback_message_printed:
-            LLMClient.fallback_message_printed = True
-            console.print("\n[YATA]\nAutonomous Fallback Mode Activated\n\nNVIDIA API unavailable or timed out.\nSwitching to offline deterministic models.")
+    if args.verbose:
+        console.print(
+            Panel.fit(
+                f"[bold cyan][YATA] Autonomous Security Assessment Started[/bold cyan]\n"
+                f"[white]Target:[/white] {_clean_path(target_path)}\n"
+                f"[white]Repositories:[/white] {len(repository_roots)}\n"
+                f"[white]Mode:[/white] {args.mode.upper()}"
+            )
+        )
     else:
-        console.print("[YATA]")
-        console.print("Execution Mode:")
-        console.print("NVIDIA Assisted\n")
-        console.print("Capabilities:")
-        console.print("✓ AI Reasoning")
-        console.print("✓ Dynamic Patch Generation")
-        console.print("✓ Attack Validation")
-        console.print("✓ Security Assessment")
+        mode_str = "NVIDIA Assisted"
+        if LLMClient.execution_mode == "autonomous_fallback":
+            mode_str = "Autonomous Fallback"
+        elif LLMClient.execution_mode == "demo":
+            mode_str = "Demo"
+            
+        console.print(f"Mode: {mode_str}")
+        console.print(f"Target: {target_path.name}\n")
+
+    if args.verbose:
+        if LLMClient.execution_mode == "demo":
+            console.print("[YATA]")
+            console.print("Demo Mode\n")
+            console.print("Using Autonomous Demonstration Environment.\n")
+            console.print("AI Reasoning:")
+            console.print("Disabled")
+        elif LLMClient.execution_mode == "autonomous_fallback":
+            console.print("[YATA]")
+            console.print("Execution Mode:")
+            console.print("Autonomous Fallback\n")
+            console.print("Capabilities:")
+            console.print("✓ SQL Injection")
+            console.print("✓ Hardcoded Secret")
+            console.print("✓ Patch Verification")
+            console.print("✓ Security Assessment\n")
+            console.print("AI Reasoning:")
+            console.print("Disabled")
+            if not LLMClient.fallback_message_printed:
+                LLMClient.fallback_message_printed = True
+                console.print("\n[YATA]\nAutonomous Fallback Mode Activated\n\nNVIDIA API unavailable or timed out.\nSwitching to offline deterministic models.")
+        else:
+            console.print("[YATA]")
+            console.print("Execution Mode:")
+            console.print("NVIDIA Assisted\n")
+            console.print("Capabilities:")
+            console.print("✓ AI Reasoning")
+            console.print("✓ Dynamic Patch Generation")
+            console.print("✓ Attack Validation")
+            console.print("✓ Security Assessment")
+    else:
+        if LLMClient.execution_mode == "autonomous_fallback":
+            if not LLMClient.fallback_message_printed:
+                LLMClient.fallback_message_printed = True
+                console.print("Autonomous Fallback Mode Activated\n")
+                console.print("NVIDIA API unavailable or timed out.")
+                console.print("Switching to offline deterministic models.\n")
 
     for repository_root in repository_roots:
+        if len(repository_roots) > 1 and not args.verbose:
+            console.print("Current Repository:")
+            console.print(f"{repository_root.name}")
+
         summary = _run_repository(
             repository_root=repository_root,
             mode=args.mode,
@@ -235,10 +274,25 @@ def main(argv: list[str] | None = None) -> int:
             red_agent=red_agent,
             blue_agent=blue_agent,
             report_generator=report_generator,
+            verbose=args.verbose,
+            live=args.live,
+            quiet=args.quiet,
+            multi_repo=(len(repository_roots) > 1),
         )
         summaries.append(summary)
 
-    _print_suite_summary(summaries)
+        if len(repository_roots) > 1 and not args.verbose:
+            checkmark = "[bold green]✓[/bold green]" if summary.verification_result == "Passed" else "[bold red]✗[/bold red]"
+            max_repo_len = max(len(r.name) for r in repository_roots)
+            console.print(f"{summary.repository_name:<{max_repo_len}}      {checkmark} {summary.vulnerability_summary:<18}   {summary.initial_security_score} → {summary.security_score}\n")
+
+    if len(repository_roots) > 1 and not args.verbose:
+        console.print("────────────────────────────")
+        console.print("Reports Generated ✓")
+        console.print("────────────────────────────")
+    elif args.verbose:
+        _print_suite_summary(summaries)
+
     return 0 if all(summary.battle_status == "complete" for summary in summaries) else 1
 
 
@@ -266,6 +320,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=5,
         help="Maximum number of attack/patch/verify rounds before stopping",
     )
+    assess_parser.add_argument("--verbose", action="store_true", help="Display verbose debugging information")
+    assess_parser.add_argument("--live", action="store_true", help="Enable live feedback mode (future feature placeholder)")
+    assess_parser.add_argument("--quiet", action="store_true", help="Run in quiet mode (future feature placeholder)")
 
     args = parser.parse_args(raw_args)
 
@@ -307,6 +364,10 @@ def _run_repository(
     red_agent: RedAgent,
     blue_agent: BlueAgent,
     report_generator: ReportGenerator,
+    verbose: bool = False,
+    live: bool = False,
+    quiet: bool = False,
+    multi_repo: bool = False,
 ) -> RepositoryRunSummary:
     global console
     console = Console(record=True)
@@ -323,29 +384,41 @@ def _run_repository(
     t_healer_patch = 0.0
     t_validator_verification = 0.0
 
-    console.print(
-        Panel.fit(
-            f"[bold cyan]Repository: {repository_root.name}[/bold cyan]\n"
-            f"[white]Path:[/white] {_clean_path(repository_root)}"
+    if verbose:
+        console.print(
+            Panel.fit(
+                f"[bold cyan]Repository: {repository_root.name}[/bold cyan]\n"
+                f"[white]Path:[/white] {_clean_path(repository_root)}"
+            )
         )
-    )
+    else:
+        if not multi_repo:
+            console.print("Working On:")
+            console.print(f"{repository_root.name}\n")
+            if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
+                console.print("HUNTER      → Deterministic Mode")
+                console.print("HEALER      → Deterministic Mode\n")
 
     referee = Referee()
     target_root = repository_root.resolve()
 
-    yata_dir = target_root / ".yata"
-    reports_dir = yata_dir / "reports"
-    patches_dir = yata_dir / "patches"
-    analysis_dir = yata_dir / "analysis"
-    logs_dir = yata_dir / "logs"
+    project_root = Path(__file__).resolve().parent
+    yata_dir = project_root / ".yata"
+    repo_name = repository_root.name
+    reports_dir = yata_dir / "reports" / repo_name
+    patches_dir = yata_dir / "patches" / repo_name
+    analysis_dir = yata_dir / "analysis" / repo_name
+    logs_dir = yata_dir / "logs" / repo_name
+    metadata_dir = yata_dir / "metadata" / repo_name
 
     yata_dir.mkdir(exist_ok=True)
-    reports_dir.mkdir(exist_ok=True)
-    patches_dir.mkdir(exist_ok=True)
-    analysis_dir.mkdir(exist_ok=True)
-    logs_dir.mkdir(exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    patches_dir.mkdir(parents=True, exist_ok=True)
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    metadata_dir.mkdir(parents=True, exist_ok=True)
 
-    metadata_file = yata_dir / "metadata.json"
+    metadata_file = metadata_dir / "metadata.json"
     metadata_content = {
         "version": "0.4.2",
         "workspace_initialized": True,
@@ -355,12 +428,13 @@ def _run_repository(
 
     report_generator.reports_root = reports_dir
 
-    console.print("[bold cyan][YATA][/bold cyan] Workspace initialized at:")
-    console.print(f"  {_clean_path(yata_dir)}")
-    console.print("[bold cyan][YATA][/bold cyan] Reports:             .yata/reports/")
-    console.print("[bold cyan][YATA][/bold cyan] Patched Files:       .yata/patches/")
-    console.print("[bold cyan][YATA][/bold cyan] Security Assessment: .yata/analysis/")
-    console.print("[bold cyan][YATA][/bold cyan] Logs:                .yata/logs/\n")
+    if verbose:
+        console.print("[bold cyan][YATA][/bold cyan] Workspace initialized at:")
+        console.print(f"  {_clean_path(yata_dir)}")
+        console.print(f"[bold cyan][YATA][/bold cyan] Reports:             {_clean_path(reports_dir)}/")
+        console.print(f"[bold cyan][YATA][/bold cyan] Patched Files:       {_clean_path(patches_dir)}/")
+        console.print(f"[bold cyan][YATA][/bold cyan] Security Assessment: {_clean_path(analysis_dir)}/")
+        console.print(f"[bold cyan][YATA][/bold cyan] Logs:                {_clean_path(logs_dir)}/\n")
 
     current_root = target_root
     round_reports: list[dict] = []
@@ -377,8 +451,9 @@ def _run_repository(
     score_before_all = 100
 
     for round_number in range(1, max_rounds + 1):
-        console.print(Panel(f"[bold magenta]Assessment Round {round_number}[/bold magenta]", border_style="magenta", expand=False))
-        console.print("[bold red][HUNTER][/bold red] Evaluating attack paths...")
+        if verbose:
+            console.print(Panel(f"[bold magenta]Assessment Round {round_number}[/bold magenta]", border_style="magenta", expand=False))
+            console.print("[bold red][HUNTER][/bold red] Evaluating attack paths...")
 
         start_disc = time.time()
         findings = red_agent.scan(current_root)
@@ -407,17 +482,19 @@ def _run_repository(
             score_before_all = score_before
 
         if not findings:
-            console.print("[bold green][VALIDATOR][/bold green] Repository is clean. No further weaknesses found.")
+            if verbose:
+                console.print("[bold green][VALIDATOR][/bold green] Repository is clean. No further weaknesses found.")
             break
 
         start_att = time.time()
-        selection = _select_verified_attack(red_agent, referee, current_root, findings, all_findings)
+        selection = _select_verified_attack(red_agent, referee, current_root, findings, all_findings, verbose=verbose, multi_repo=multi_repo)
         t_hunter_attack += time.time() - start_att
 
         if selection is None:
             battle_status = "stalled"
             termination_reason = "Detectors flagged suspicious patterns, but VALIDATOR could not reproduce an exploit."
-            console.print("[bold yellow][VALIDATOR][/bold yellow] Weakness could not be exploited. Halting cycle.")
+            if verbose:
+                console.print("[bold yellow][VALIDATOR][/bold yellow] Weakness could not be exploited. Halting cycle.")
             break
 
         finding, attack_plan, vulnerable_check = selection
@@ -432,45 +509,70 @@ def _run_repository(
         }
         sev_color = severity_colors.get(severity, "bold white")
         
-        console.print(f"[bold red][HUNTER][/bold red] Prioritized weakness: [bold cyan]{finding.vulnerability_type}[/bold cyan]")
-        console.print(f" └─ Severity:  [{sev_color}]{severity}[/{sev_color}]")
-        console.print(f" └─ Location:  {_clean_path(finding.metadata.get('relative_file', finding.affected_file))}:{finding.line_number}")
-        console.print(f" └─ OWASP:     {mapping.get('owasp', 'N/A')}")
-        console.print(f" └─ CWE:       {mapping.get('cwe', 'N/A')}")
-        impact_str = ", ".join(mapping.get('impact', 'N/A').split(", "))
-        console.print(f" └─ Impact:    {impact_str}")
-        console.print(f" └─ Payload:   [cyan]{attack_plan.payload}[/cyan]")
-        console.print(f"[bold green][VALIDATOR][/bold green] Vulnerability verified: {vulnerable_check.evidence}")
+        if verbose:
+            console.print(f"[bold red][HUNTER][/bold red] Prioritized weakness: [bold cyan]{finding.vulnerability_type}[/bold cyan]")
+            console.print(f" └─ Severity:  [{sev_color}]{severity}[/{sev_color}]")
+            console.print(f" └─ Location:  {_clean_path(finding.metadata.get('relative_file', finding.affected_file))}:{finding.line_number}")
+            console.print(f" └─ OWASP:     {mapping.get('owasp', 'N/A')}")
+            console.print(f" └─ CWE:       {mapping.get('cwe', 'N/A')}")
+            impact_str = ", ".join(mapping.get('impact', 'N/A').split(", "))
+            console.print(f" └─ Impact:    {impact_str}")
+            console.print(f" └─ Payload:   [cyan]{attack_plan.payload}[/cyan]")
+            console.print(f"[bold green][VALIDATOR][/bold green] Vulnerability verified: {vulnerable_check.evidence}")
+        else:
+            if not multi_repo:
+                console.print(f"Location: {_clean_path(finding.metadata.get('relative_file', finding.affected_file))}:{finding.line_number}")
+                console.print(f"Severity: {severity}")
 
-        console.print("[bold blue][HEALER][/bold blue] Generating secure patch...")
+        if verbose:
+            console.print("[bold blue][HEALER][/bold blue] Generating secure patch...")
 
         start_patch = time.time()
         patch_result = blue_agent.generate_patch(current_root, finding)
         t_healer_patch += time.time() - start_patch
         patches_generated += 1
-        rel_patch_path = Path(".yata/patches") / Path(patch_result.patched_file).name
-        console.print(f" └─ Patch written → {rel_patch_path}")
-        if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
-            print("[VALIDATOR]")
+        try:
+            rel_file = Path(patch_result.patched_file).relative_to(patch_result.patched_root)
+        except ValueError:
+            rel_file = Path(patch_result.patched_file).name
+        rel_patch_path = _clean_path(patches_dir / rel_file)
+        if verbose:
+            console.print(f" └─ Patch written → {rel_patch_path}")
         else:
-            console.print("[bold cyan][VALIDATOR][/bold cyan] Attacking patched code...")
+            if not multi_repo:
+                console.print()
+                console.print("HEALER      [bold green]✓[/bold green] Patch Generated\n")
+
+        if verbose:
+            if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
+                print("[VALIDATOR]")
+            else:
+                console.print("[bold cyan][VALIDATOR][/bold cyan] Attacking patched code...")
 
         start_verify = time.time()
         patched_check = referee.verify_exploit(patch_result.patched_root, finding, attack_plan.payload)
         t_validator_verification += time.time() - start_verify
         patch_succeeded = not patched_check.attack_succeeded
 
-        if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
-            if patch_succeeded:
-                print("Exploit blocked.\n")
-                print("Patch verified.")
+        if verbose:
+            if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
+                if patch_succeeded:
+                    print("Exploit blocked.\n")
+                    print("Patch verified.")
+                else:
+                    print("Exploit succeeded.\n")
+                    print("Patch failed.")
             else:
-                print("Exploit succeeded.\n")
-                print("Patch failed.")
+                if patch_succeeded:
+                    console.print(" └─ Exploit blocked ✓")
+                    console.print("[bold blue][HEALER][/bold blue] Patch verified.\n")
         else:
-            if patch_succeeded:
-                console.print(" └─ Exploit blocked ✓")
-                console.print("[bold blue][HEALER][/bold blue] Patch verified.\n")
+            if not multi_repo:
+                if patch_succeeded:
+                    val_msg = "Secret Externalized" if finding.vulnerability_type == "Hardcoded Secret" else "Exploit Blocked"
+                    console.print(f"VALIDATOR   [bold green]✓[/bold green] {val_msg}\n")
+                else:
+                    console.print("VALIDATOR   [bold red]✗[/bold red] Exploit Succeeded\n")
 
         if patch_succeeded:
             healed_count += 1
@@ -496,11 +598,13 @@ def _run_repository(
                     apply_verified = True
 
             if apply_verified:
-                console.print("[bold cyan][YATA][/bold cyan] Applying verified patch to original repository...\n")
+                if verbose:
+                    console.print("[bold cyan][YATA][/bold cyan] Applying verified patch to original repository...\n")
                 _apply_patch_to_original(target_root, patch_result)
                 current_root = target_root
                 patch_applied = True
-                console.print("[bold cyan][YATA][/bold cyan] Repository healed successfully.")
+                if verbose:
+                    console.print("[bold cyan][YATA][/bold cyan] Repository healed successfully.")
             else:
                 current_root = patch_result.patched_root
 
@@ -509,13 +613,13 @@ def _run_repository(
             t_hunter_discovery += time.time() - start_disc
             for next_finding in remaining_findings:
                 discovered_findings.add(_finding_key(next_finding))
-            if LLMClient.execution_mode not in ("autonomous_fallback", "demo"):
+            if verbose and LLMClient.execution_mode not in ("autonomous_fallback", "demo"):
                 console.print("[bold green][VALIDATOR][/bold green] Patch verification successful. Changes promoted.")
         else:
             remaining_findings = findings
             battle_status = "stalled"
             termination_reason = "The patched copy still allowed the exploit."
-            if LLMClient.execution_mode not in ("autonomous_fallback", "demo"):
+            if verbose and LLMClient.execution_mode not in ("autonomous_fallback", "demo"):
                 console.print(" └─ Exploit succeeded ✗")
                 console.print("[bold red][VALIDATOR][/bold red] Patch verification failed. Exploit bypass found.")
 
@@ -528,10 +632,11 @@ def _run_repository(
             score_before=score_before,
             score_after=score_after,
         )
-        console.print(
-            f"[bold cyan][VALIDATOR][/bold cyan] Security score updated: {round_score.score_before} -> "
-            f"{round_score.score_after} ({round_score.score_delta:+d})"
-        )
+        if verbose:
+            console.print(
+                f"[bold cyan][VALIDATOR][/bold cyan] Security score updated: {round_score.score_before} -> "
+                f"{round_score.score_after} ({round_score.score_delta:+d})"
+            )
 
         round_reports.append(
             _build_round_report(
@@ -558,7 +663,8 @@ def _run_repository(
             discovered_findings.add(_finding_key(finding))
         battle_status = "max_rounds_reached"
         termination_reason = f"Reached max round limit ({max_rounds}) before the system became clean."
-        console.print("[bold yellow][VALIDATOR][/bold yellow] Maximum rounds reached before the repository became clean.")
+        if verbose:
+            console.print("[bold yellow][VALIDATOR][/bold yellow] Maximum rounds reached before the repository became clean.")
 
     verification_result = "Passed" if battle_status == "complete" and not remaining_findings else "Failed"
     final_score = referee.calculate_security_score(remaining_findings)
@@ -668,50 +774,69 @@ def _run_repository(
     log_file = logs_dir / f"run_{datetime.now().strftime('%Y-%m-%d')}.log"
     log_file.write_text(log_content, encoding="utf-8")
 
-    elapsed_time = int(t_total_runtime)
-    _print_security_assessment_card(
-        repository_root.name,
-        score_before_all,
-        final_score,
-        healed_count,
-        elapsed_time
-    )
+    v_types = {f[0] for f in discovered_findings}
+    if not v_types:
+        v_summary = "Clean"
+    elif len(v_types) == 1:
+        v_summary = list(v_types)[0]
+    else:
+        v_summary = "Mixed"
 
-    # Performance Telemetry Dashboard Output
-    console.print("\n[bold cyan][YATA] Performance Metrics[/bold cyan]\n")
-    console.print(f"HUNTER Discovery:         {t_hunter_discovery:.1f}s")
-    console.print(f"HUNTER Attack Eval:       {t_hunter_attack:.1f}s\n")
-    console.print(f"HEALER Patch Generation: {t_healer_patch:.1f}s\n")
-    console.print(f"VALIDATOR Verification:   {t_validator_verification:.1f}s\n")
-    console.print(f"LLM Requests:             {llm_requests}")
-    console.print(f"LLM Time:                {llm_time:.1f}s")
-    console.print(f"Average Response:         {avg_llm_response:.1f}s\n")
-    console.print(f"Report Generation:        {t_report_generation:.1f}s\n")
-    console.print(f"TOTAL Runtime:           {t_total_runtime:.1f}s")
+    if verbose:
+        elapsed_time = int(t_total_runtime)
+        _print_security_assessment_card(
+            repository_root.name,
+            score_before_all,
+            final_score,
+            healed_count,
+            elapsed_time
+        )
 
-    # Runtime Warnings
-    if t_total_runtime > 120:
-        console.print("\n[bold red][YATA] Critical Runtime Warning[/bold red]\n")
-        console.print("Assessment duration may impact interactive workflows.")
-    elif t_total_runtime > 60:
-        console.print("\n[bold yellow][YATA] Performance Warning[/bold yellow]\n")
-        console.print("Repository assessment exceeded recommended runtime.")
-        console.print("Consider provider fallback or reducing attack library size.")
-    console.print()
+        # Performance Telemetry Dashboard Output
+        console.print("\n[bold cyan][YATA] Performance Metrics[/bold cyan]\n")
+        console.print(f"HUNTER Discovery:         {t_hunter_discovery:.1f}s")
+        console.print(f"HUNTER Attack Eval:       {t_hunter_attack:.1f}s\n")
+        console.print(f"HEALER Patch Generation: {t_healer_patch:.1f}s\n")
+        console.print(f"VALIDATOR Verification:   {t_validator_verification:.1f}s\n")
+        console.print(f"LLM Requests:             {llm_requests}")
+        console.print(f"LLM Time:                {llm_time:.1f}s")
+        console.print(f"Average Response:         {avg_llm_response:.1f}s\n")
+        console.print(f"Report Generation:        {t_report_generation:.1f}s\n")
+        console.print(f"TOTAL Runtime:           {t_total_runtime:.1f}s")
 
-    console.print("[bold cyan][YATA] Security assessment complete.[/bold cyan]")
-    cleaned_report_paths = {k: _clean_path(v) for k, v in report_paths.items()}
-    console.print(json.dumps(cleaned_report_paths, indent=2))
+        # Runtime Warnings
+        if t_total_runtime > 120:
+            console.print("\n[bold red][YATA] Critical Runtime Warning[/bold red]\n")
+            console.print("Assessment duration may impact interactive workflows.")
+        elif t_total_runtime > 60:
+            console.print("\n[bold yellow][YATA] Performance Warning[/bold yellow]\n")
+            console.print("Repository assessment exceeded recommended runtime.")
+            console.print("Consider provider fallback or reducing attack library size.")
+        console.print()
 
-    verification_result = "Passed" if battle_status == "complete" and not remaining_findings else "Failed"
+        console.print("[bold cyan][YATA] Security assessment complete.[/bold cyan]")
+        cleaned_report_paths = {k: _clean_path(v) for k, v in report_paths.items()}
+        console.print(json.dumps(cleaned_report_paths, indent=2))
+    else:
+        if not multi_repo:
+            _print_simplified_final_summary(
+                repository_root.name,
+                healed_count,
+                score_before_all,
+                final_score,
+                t_total_runtime
+            )
+
     return RepositoryRunSummary(
         repository_name=repository_root.name,
         vulnerabilities_found=len(discovered_findings),
         patches_generated=patches_generated,
         verification_result=verification_result,
         security_score=final_score,
+        initial_security_score=score_before_all,
         battle_status=battle_status,
         report_paths=report_paths,
+        vulnerability_summary=v_summary,
     )
 
 
@@ -721,12 +846,15 @@ def _select_verified_attack(
     current_root: Path,
     findings: list[VulnerabilityFinding],
     findings_tracker: dict[tuple, dict] | None = None,
+    verbose: bool = False,
+    multi_repo: bool = False,
 ) -> tuple[VulnerabilityFinding, AttackPlan, VerificationResult] | None:
     for finding in red_agent.prioritize(findings):
         payloads = red_agent.get_payloads_for_finding(finding)
         
-        console.print(f"[bold red][HUNTER][/bold red] Evaluating attack paths for {finding.vulnerability_type}...")
-        console.print(f" └─ Payloads loaded: {len(payloads)}")
+        if verbose:
+            console.print(f"[bold red][HUNTER][/bold red] Evaluating attack paths for {finding.vulnerability_type}...")
+            console.print(f" └─ Payloads loaded: {len(payloads)}")
 
         winning_payload = None
         vulnerable_check = None
@@ -737,18 +865,21 @@ def _select_verified_attack(
             payloads_attempted.append(payload)
 
             if finding.vulnerability_type == "Hardcoded Secret" and payload != finding.exploit_payload:
-                console.print(f" └─ Payload {idx}/{len(payloads)} FAIL")
+                if verbose:
+                    console.print(f" └─ Payload {idx}/{len(payloads)} FAIL")
                 continue
 
             check = referee.verify_exploit(current_root, finding, payload)
             if check.attack_succeeded:
-                console.print(f" └─ Payload {idx}/{len(payloads)} SUCCESS ✓")
+                if verbose:
+                    console.print(f" └─ Payload {idx}/{len(payloads)} SUCCESS ✓")
                 winning_payload = payload
                 vulnerable_check = check
                 attack_success = True
                 break
             else:
-                console.print(f" └─ Payload {idx}/{len(payloads)} FAIL")
+                if verbose:
+                    console.print(f" └─ Payload {idx}/{len(payloads)} FAIL")
 
         if findings_tracker is not None:
             key = _finding_key(finding)
@@ -761,9 +892,13 @@ def _select_verified_attack(
 
         if attack_success and vulnerable_check is not None and winning_payload is not None:
             attack_plan = red_agent.plan_attack(finding, winning_payload)
+            if not verbose:
+                if not multi_repo:
+                    console.print(f"HUNTER      [bold green]✓[/bold green] {finding.vulnerability_type} Confirmed")
             return finding, attack_plan, vulnerable_check
 
-        console.print("[bold yellow][VALIDATOR][/bold yellow] Weakness could not be exploited. Continuing search.")
+        if verbose:
+            console.print("[bold yellow][VALIDATOR][/bold yellow] Weakness could not be exploited. Continuing search.")
     return None
 
 
@@ -852,6 +987,28 @@ def _finding_key(finding: VulnerabilityFinding) -> tuple[str, str, str, str]:
         identity_hint,
         finding.detector_id,
     )
+
+
+def _print_simplified_final_summary(
+    repo_name: str,
+    healed_count: int,
+    initial_score: int,
+    final_score: int,
+    runtime: float,
+) -> None:
+    summary_content = (
+        "[bold white]Assessment Complete[/bold white]\n\n"
+        "[bold]Repository:[/bold]\n"
+        f"{repo_name}\n\n"
+        "[bold]Vulnerabilities Healed:[/bold]\n"
+        f"{healed_count}\n\n"
+        "[bold]Security Score:[/bold]\n"
+        f"{initial_score} → {final_score}\n\n"
+        "[bold]Runtime:[/bold]\n"
+        f"{runtime:.1f}s\n\n"
+        "[bold green]Reports Generated ✓[/bold green]"
+    )
+    console.print(Panel(summary_content, border_style="cyan", expand=False))
 
 
 def _print_security_assessment_card(

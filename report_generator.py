@@ -44,6 +44,18 @@ VULNERABILITY_MAPPING = {
 
 def _clean_path(path: object) -> str:
     path_str = str(path).replace("\\", "/")
+    project_root_str = str(Path(__file__).resolve().parent).replace("\\", "/")
+    if path_str.startswith(project_root_str):
+        rel = path_str[len(project_root_str):].lstrip("/")
+        if rel.startswith(".yata"):
+            return rel
+        if "yata_patched_" in path_str:
+            parts = path_str.split("/")
+            for i, part in enumerate(parts):
+                if "yata_patched_" in part:
+                    return ".yata/sandbox/" + "/".join(parts[i+1:])
+        return rel
+
     if "yata_patched_" in path_str:
         parts = path_str.split("/")
         for i, part in enumerate(parts):

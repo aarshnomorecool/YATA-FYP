@@ -357,6 +357,7 @@ class RedAgent:
         self.llm = llm_client or LLMClient()
         self.detectors = detectors or [SQLInjectionDetector(), HardcodedSecretDetector()]
         self.attack_library = AttackLibrary()
+        self.verbose = False
 
     def scan(self, target_root: Path) -> list[VulnerabilityFinding]:
         target_root = target_root.resolve()
@@ -394,8 +395,9 @@ class RedAgent:
             payload = self.generate_exploit_payload(finding)
         attack_path, fallback_explanation = self._build_attack_context(finding, payload)
         if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
-            print("[HUNTER]")
-            print("Using deterministic attack strategy.")
+            if self.verbose:
+                print("[HUNTER]")
+                print("Using deterministic attack strategy.")
             return AttackPlan(
                 finding=finding,
                 payload=payload,
@@ -419,6 +421,7 @@ class RedAgent:
             ),
             fallback_text=fallback_explanation,
             max_tokens=220,
+            request_type="hunter",
         )
         return AttackPlan(
             finding=finding,

@@ -1,24 +1,19 @@
-# Secrets
+# YATA Workspace
+.yata/
+
+# Demo copies
+demo_repo*/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Local environments
 .env
 .env.*
 !.env.example
 
-# Python
-.venv/
-__pycache__/
-*.pyc
-
-# Databases
+# SQLite databases generated during testing
 *.db
-
-# YATA Workspace
-.yata/
-
-# Generated Reports
-reports/
-
-# Logs
-*.log
-
-# Demo workspace
-demo_repo5_mixed/
+.venv/

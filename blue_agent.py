@@ -206,11 +206,13 @@ class BlueAgent:
             SQLInjectionPatchStrategy.vulnerability_type: SQLInjectionPatchStrategy(),
             HardcodedSecretPatchStrategy.vulnerability_type: HardcodedSecretPatchStrategy(),
         }
+        self.verbose = False
 
     def generate_patch(self, target_root: Path, finding: VulnerabilityFinding) -> PatchResult:
         if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
-            print("[HEALER]")
-            print("Using deterministic remediation strategy.")
+            if self.verbose:
+                print("[HEALER]")
+                print("Using deterministic remediation strategy.")
             import fallback_patches
             return fallback_patches.generate_patch(target_root, finding)
 
@@ -240,6 +242,7 @@ class BlueAgent:
             user_prompt=self._build_patch_prompt(original_source, finding),
             fallback_text="LLM patch suggestion unavailable; using deterministic local patch strategy.",
             max_tokens=1600,
+            request_type="healer",
         )
 
         llm_source = self._extract_code_candidate(patch_llm_response.content)
