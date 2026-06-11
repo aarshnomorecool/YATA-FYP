@@ -208,6 +208,12 @@ class BlueAgent:
         }
 
     def generate_patch(self, target_root: Path, finding: VulnerabilityFinding) -> PatchResult:
+        if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
+            print("[HEALER]")
+            print("Using deterministic remediation strategy.")
+            import fallback_patches
+            return fallback_patches.generate_patch(target_root, finding)
+
         strategy = self.strategies.get(finding.vulnerability_type)
         if strategy is None:
             raise ValueError(f"No patch strategy registered for {finding.vulnerability_type}")

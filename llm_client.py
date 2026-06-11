@@ -29,6 +29,8 @@ class LLMClient:
         "qwen/qwen2.5-coder-32b-instruct": DEFAULT_MODEL,
         "qwen/qwen3-coder-480b-a35b-instruct": DEFAULT_MODEL,
     }
+    execution_mode = "nvidia_assisted"
+    fallback_message_printed = False
 
     def __init__(
         self,
@@ -59,7 +61,11 @@ class LLMClient:
             or os.getenv("NGC_API_KEY")
             or env_values.get("NGC_API_KEY")
         )
+        if not self.api_key and LLMClient.execution_mode != "demo":
+            LLMClient.execution_mode = "autonomous_fallback"
         self.timeout = timeout
+        self.llm_requests = 0
+        self.llm_time = 0.0
 
     def generate(
         self,
@@ -71,43 +77,55 @@ class LLMClient:
         top_p: float = 0.7,
         max_tokens: int = 700,
     ) -> LLMResponse:
-        if not self.api_key:
-            return self._fallback(
-                "Missing NVIDIA_API_KEY or NGC_API_KEY in .env; using local fallback behavior.",
-                fallback_text,
-            )
+        import time
+        start_time = time.time()
+        self.llm_requests += 1
 
         try:
-            return self._invoke_model(
-                model_name=self.model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-            )
-        except Exception as exc:
-            replacement_model = self.MODEL_FALLBACKS.get(self.model)
-            error_message = self._format_exception(exc)
-            if replacement_model and self._looks_end_of_life_error(error_message):
-                try:
-                    return self._invoke_model(
-                        model_name=replacement_model,
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        temperature=temperature,
-                        top_p=top_p,
-                        max_tokens=max_tokens,
-                    )
-                except Exception as replacement_exc:
-                    replacement_error = self._format_exception(replacement_exc)
-                    combined_error = (
-                        f"{error_message} | Replacement model {replacement_model} also failed: {replacement_error}"
-                    )
-                    return self._fallback(combined_error, fallback_text)
-            return self._fallback(error_message, fallback_text)
+            if not self.api_key:
+                return self._fallback(
+                    "Missing NVIDIA_API_KEY or NGC_API_KEY in .env; using local fallback behavior.",
+                    fallback_text,
+                )
+
+            try:
+                return self._invoke_model(
+                    model_name=self.model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                    top_p=top_p,
+                    max_tokens=max_tokens,
+                )
+            except Exception as exc:
+                replacement_model = self.MODEL_FALLBACKS.get(self.model)
+                error_message = self._format_exception(exc)
+                if replacement_model and self._looks_end_of_life_error(error_message):
+                    try:
+                        return self._invoke_model(
+                            model_name=replacement_model,
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            temperature=temperature,
+                            top_p=top_p,
+                            max_tokens=max_tokens,
+                        )
+                    except Exception as replacement_exc:
+                        replacement_error = self._format_exception(replacement_exc)
+                        combined_error = (
+                            f"{error_message} | Replacement model {replacement_model} also failed: {replacement_error}"
+                        )
+                        return self._fallback(combined_error, fallback_text)
+                return self._fallback(error_message, fallback_text)
+        finally:
+            self.llm_time += time.time() - start_time
 
     def _fallback(self, error: str, fallback_text: str) -> LLMResponse:
+        if LLMClient.execution_mode == "nvidia_assisted":
+            LLMClient.execution_mode = "autonomous_fallback"
+            if not LLMClient.fallback_message_printed:
+                LLMClient.fallback_message_printed = True
+                print("\n[YATA]\nAutonomous Fallback Mode Activated\n\nNVIDIA API unavailable or timed out.\nSwitching to offline deterministic models.")
         return LLMResponse(
             success=False,
             content=fallback_text,

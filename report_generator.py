@@ -69,6 +69,8 @@ class SecurityReport:
     remaining_findings: list[dict]
     capability_matrix: dict[str, dict[str, str]]
     rounds: list[dict]
+    performance_telemetry: dict[str, float]
+    execution_mode: str
 
 
 class ReportGenerator:
@@ -91,6 +93,8 @@ class ReportGenerator:
         remaining_findings: list[VulnerabilityFinding],
         rounds: list[dict],
         capability_matrix: dict[str, dict[str, str]],
+        performance_telemetry: dict[str, float],
+        execution_mode: str,
     ) -> SecurityReport:
         cleaned_target = _clean_path(target_root)
         cleaned_final = _clean_path(final_root)
@@ -128,6 +132,8 @@ class ReportGenerator:
             remaining_findings=cleaned_remaining,
             capability_matrix=capability_matrix,
             rounds=cleaned_rounds,
+            performance_telemetry=performance_telemetry,
+            execution_mode=execution_mode,
         )
 
     def write_reports(self, report: SecurityReport) -> dict[str, str]:
@@ -159,9 +165,39 @@ class ReportGenerator:
             f"- Rounds Completed: {report.rounds_completed}",
             f"- Final Security Score: {report.final_security_score}",
             "",
-            "## Round Summary",
+            "## Execution Information",
             "",
         ]
+        if report.execution_mode in ("autonomous_fallback", "demo"):
+            lines.extend([
+                f"- Execution Mode: {report.execution_mode}",
+                "- Hunter Strategy: deterministic",
+                "- Healer Strategy: deterministic",
+                "- LLM Requests: 0",
+            ])
+        else:
+            lines.extend([
+                "- Execution Mode: nvidia_assisted",
+            ])
+        lines.extend([
+            "",
+            "## Performance Telemetry",
+            "",
+            "| Metric | Value |",
+            "|----------|----------|",
+            f"| Hunter Discovery | {report.performance_telemetry.get('hunter_discovery', 0.0):.1f}s |",
+            f"| Hunter Attack Evaluation | {report.performance_telemetry.get('hunter_attack', 0.0):.1f}s |",
+            f"| Healer Patch Generation | {report.performance_telemetry.get('healer_patch', 0.0):.1f}s |",
+            f"| Validator Verification | {report.performance_telemetry.get('validator_verification', 0.0):.1f}s |",
+            f"| LLM Requests | {int(report.performance_telemetry.get('llm_requests', 0))} |",
+            f"| LLM Time | {report.performance_telemetry.get('llm_time', 0.0):.1f}s |",
+            f"| Average LLM Response | {report.performance_telemetry.get('avg_llm_response', 0.0):.1f}s |",
+            f"| Report Generation | {report.performance_telemetry.get('report_generation', 0.0):.1f}s |",
+            f"| Total Runtime | {report.performance_telemetry.get('total_runtime', 0.0):.1f}s |",
+            "",
+            "## Round Summary",
+            "",
+        ])
 
         if not report.rounds:
             lines.append("- No rounds were executed.")

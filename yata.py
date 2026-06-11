@@ -18,6 +18,7 @@ from blue_agent import BlueAgent, PatchResult
 from red_agent import AttackPlan, RedAgent, VulnerabilityFinding
 from report_generator import ReportGenerator
 from verifier import Referee, VerificationResult
+from llm_client import LLMClient
 
 
 console = Console()
@@ -131,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.demo:
+        LLMClient.execution_mode = "demo"
         src_demo = Path(__file__).resolve().parent / "test_repositories" / "repo5_mixed"
         dest_demo = Path(__file__).resolve().parent / "demo_repo5_mixed"
         
@@ -194,6 +196,36 @@ def main(argv: list[str] | None = None) -> int:
     blue_agent = BlueAgent()
     report_generator = ReportGenerator(Path(__file__).resolve().parent / "reports")
     summaries: list[RepositoryRunSummary] = []
+
+    if LLMClient.execution_mode == "demo":
+        console.print("[YATA]")
+        console.print("Demo Mode\n")
+        console.print("Using Autonomous Demonstration Environment.\n")
+        console.print("AI Reasoning:")
+        console.print("Disabled")
+    elif LLMClient.execution_mode == "autonomous_fallback":
+        console.print("[YATA]")
+        console.print("Execution Mode:")
+        console.print("Autonomous Fallback\n")
+        console.print("Capabilities:")
+        console.print("✓ SQL Injection")
+        console.print("✓ Hardcoded Secret")
+        console.print("✓ Patch Verification")
+        console.print("✓ Security Assessment\n")
+        console.print("AI Reasoning:")
+        console.print("Disabled")
+        if not LLMClient.fallback_message_printed:
+            LLMClient.fallback_message_printed = True
+            console.print("\n[YATA]\nAutonomous Fallback Mode Activated\n\nNVIDIA API unavailable or timed out.\nSwitching to offline deterministic models.")
+    else:
+        console.print("[YATA]")
+        console.print("Execution Mode:")
+        console.print("NVIDIA Assisted\n")
+        console.print("Capabilities:")
+        console.print("✓ AI Reasoning")
+        console.print("✓ Dynamic Patch Generation")
+        console.print("✓ Attack Validation")
+        console.print("✓ Security Assessment")
 
     for repository_root in repository_roots:
         summary = _run_repository(
@@ -279,7 +311,17 @@ def _run_repository(
     global console
     console = Console(record=True)
 
+    # Initialize Telemetry
     start_time = time.time()
+    red_agent.llm.llm_requests = 0
+    red_agent.llm.llm_time = 0.0
+    blue_agent.llm.llm_requests = 0
+    blue_agent.llm.llm_time = 0.0
+
+    t_hunter_discovery = 0.0
+    t_hunter_attack = 0.0
+    t_healer_patch = 0.0
+    t_validator_verification = 0.0
 
     console.print(
         Panel.fit(
@@ -305,7 +347,7 @@ def _run_repository(
 
     metadata_file = yata_dir / "metadata.json"
     metadata_content = {
-        "version": "0.4.1",
+        "version": "0.4.2",
         "workspace_initialized": True,
         "created_by": "YATA"
     }
@@ -338,7 +380,10 @@ def _run_repository(
         console.print(Panel(f"[bold magenta]Assessment Round {round_number}[/bold magenta]", border_style="magenta", expand=False))
         console.print("[bold red][HUNTER][/bold red] Evaluating attack paths...")
 
+        start_disc = time.time()
         findings = red_agent.scan(current_root)
+        t_hunter_discovery += time.time() - start_disc
+
         for finding in findings:
             discovered_findings.add(_finding_key(finding))
             
@@ -365,7 +410,10 @@ def _run_repository(
             console.print("[bold green][VALIDATOR][/bold green] Repository is clean. No further weaknesses found.")
             break
 
+        start_att = time.time()
         selection = _select_verified_attack(red_agent, referee, current_root, findings, all_findings)
+        t_hunter_attack += time.time() - start_att
+
         if selection is None:
             battle_status = "stalled"
             termination_reason = "Detectors flagged suspicious patterns, but VALIDATOR could not reproduce an exploit."
@@ -396,20 +444,36 @@ def _run_repository(
 
         console.print("[bold blue][HEALER][/bold blue] Generating secure patch...")
 
+        start_patch = time.time()
         patch_result = blue_agent.generate_patch(current_root, finding)
+        t_healer_patch += time.time() - start_patch
         patches_generated += 1
         rel_patch_path = Path(".yata/patches") / Path(patch_result.patched_file).name
         console.print(f" └─ Patch written → {rel_patch_path}")
-        console.print("[bold cyan][VALIDATOR][/bold cyan] Attacking patched code...")
+        if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
+            print("[VALIDATOR]")
+        else:
+            console.print("[bold cyan][VALIDATOR][/bold cyan] Attacking patched code...")
 
+        start_verify = time.time()
         patched_check = referee.verify_exploit(patch_result.patched_root, finding, attack_plan.payload)
+        t_validator_verification += time.time() - start_verify
         patch_succeeded = not patched_check.attack_succeeded
 
-        if patch_succeeded:
-            console.print(" └─ Exploit blocked ✓")
-            console.print("[bold blue][HEALER][/bold blue] Patch verified.\n")
-            healed_count += 1
+        if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
+            if patch_succeeded:
+                print("Exploit blocked.\n")
+                print("Patch verified.")
+            else:
+                print("Exploit succeeded.\n")
+                print("Patch failed.")
+        else:
+            if patch_succeeded:
+                console.print(" └─ Exploit blocked ✓")
+                console.print("[bold blue][HEALER][/bold blue] Patch verified.\n")
 
+        if patch_succeeded:
+            healed_count += 1
             all_findings[_finding_key(finding)]["status"] = "patched"
 
             for relative_path in patch_result.changed_files:
@@ -440,16 +504,20 @@ def _run_repository(
             else:
                 current_root = patch_result.patched_root
 
+            start_disc = time.time()
             remaining_findings = red_agent.scan(current_root)
+            t_hunter_discovery += time.time() - start_disc
             for next_finding in remaining_findings:
                 discovered_findings.add(_finding_key(next_finding))
-            console.print("[bold green][VALIDATOR][/bold green] Patch verification successful. Changes promoted.")
+            if LLMClient.execution_mode not in ("autonomous_fallback", "demo"):
+                console.print("[bold green][VALIDATOR][/bold green] Patch verification successful. Changes promoted.")
         else:
             remaining_findings = findings
             battle_status = "stalled"
             termination_reason = "The patched copy still allowed the exploit."
-            console.print(" └─ Exploit succeeded ✗")
-            console.print("[bold red][VALIDATOR][/bold red] Patch verification failed. Exploit bypass found.")
+            if LLMClient.execution_mode not in ("autonomous_fallback", "demo"):
+                console.print(" └─ Exploit succeeded ✗")
+                console.print("[bold red][VALIDATOR][/bold red] Patch verification failed. Exploit bypass found.")
 
         score_after = referee.calculate_security_score(remaining_findings)
         round_score = referee.record_round(
@@ -483,7 +551,9 @@ def _run_repository(
             continue
         break
     else:
+        start_disc = time.time()
         remaining_findings = red_agent.scan(current_root)
+        t_hunter_discovery += time.time() - start_disc
         for finding in remaining_findings:
             discovered_findings.add(_finding_key(finding))
         battle_status = "max_rounds_reached"
@@ -492,6 +562,13 @@ def _run_repository(
 
     verification_result = "Passed" if battle_status == "complete" and not remaining_findings else "Failed"
     final_score = referee.calculate_security_score(remaining_findings)
+
+    # Initial Report build
+    start_rep = time.time()
+    llm_requests = red_agent.llm.llm_requests + blue_agent.llm.llm_requests
+    llm_time = red_agent.llm.llm_time + blue_agent.llm.llm_time
+    avg_llm_response = llm_time / llm_requests if llm_requests > 0 else 0.0
+
     report = report_generator.build_report(
         repository_name=repository_root.name,
         mode=mode,
@@ -510,7 +587,27 @@ def _run_repository(
             "HEALER": blue_agent.capability_matrix(),
             "VALIDATOR": referee.capability_matrix(),
         },
+        performance_telemetry={
+            "hunter_discovery": t_hunter_discovery,
+            "hunter_attack": t_hunter_attack,
+            "healer_patch": t_healer_patch,
+            "validator_verification": t_validator_verification,
+            "llm_requests": int(llm_requests) if LLMClient.execution_mode not in ("autonomous_fallback", "demo") else 0,
+            "llm_time": llm_time if LLMClient.execution_mode not in ("autonomous_fallback", "demo") else 0.0,
+            "avg_llm_response": avg_llm_response if LLMClient.execution_mode not in ("autonomous_fallback", "demo") else 0.0,
+            "report_generation": 0.0,
+            "total_runtime": 0.0,
+        },
+        execution_mode=LLMClient.execution_mode,
     )
+    report_paths = report_generator.write_reports(report)
+    
+    t_report_generation = time.time() - start_rep
+    t_total_runtime = time.time() - start_time
+
+    # Update report metrics and write again to persist accurate durations
+    report.performance_telemetry["report_generation"] = t_report_generation
+    report.performance_telemetry["total_runtime"] = t_total_runtime
     report_paths = report_generator.write_reports(report)
 
     findings_data = []
@@ -534,14 +631,44 @@ def _run_repository(
             "winning_payload": f["winning_payload"],
             "attack_success": f["attack_success"]
         })
+
+    assessment_data = {
+        "assessment_date": datetime.now().strftime("%Y-%m-%d"),
+        "performance_telemetry": {
+            "hunter_discovery": round(t_hunter_discovery, 1),
+            "hunter_attack": round(t_hunter_attack, 1),
+            "healer_patch": round(t_healer_patch, 1),
+            "validator_verification": round(t_validator_verification, 1),
+            "llm_requests": int(llm_requests) if LLMClient.execution_mode not in ("autonomous_fallback", "demo") else 0,
+            "llm_time": round(llm_time, 1) if LLMClient.execution_mode not in ("autonomous_fallback", "demo") else 0.0,
+            "avg_llm_response": round(avg_llm_response, 1) if LLMClient.execution_mode not in ("autonomous_fallback", "demo") else 0.0,
+            "report_generation": round(t_report_generation, 1),
+            "total_runtime": round(t_total_runtime, 1),
+        },
+        "findings": findings_data
+    }
+    if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
+        assessment_data.update({
+            "execution_mode": LLMClient.execution_mode,
+            "llm_requests": 0,
+            "llm_time": 0.0,
+            "fallback_actions": {
+                "hunter_deterministic": True,
+                "healer_deterministic": True
+            }
+        })
+    else:
+        assessment_data.update({
+            "execution_mode": "nvidia_assisted"
+        })
     findings_file = analysis_dir / "security_assessment.json"
-    findings_file.write_text(json.dumps(findings_data, indent=2), encoding="utf-8")
+    findings_file.write_text(json.dumps(assessment_data, indent=2), encoding="utf-8")
 
     log_content = console.export_text()
     log_file = logs_dir / f"run_{datetime.now().strftime('%Y-%m-%d')}.log"
     log_file.write_text(log_content, encoding="utf-8")
 
-    elapsed_time = int(time.time() - start_time)
+    elapsed_time = int(t_total_runtime)
     _print_security_assessment_card(
         repository_root.name,
         score_before_all,
@@ -549,6 +676,28 @@ def _run_repository(
         healed_count,
         elapsed_time
     )
+
+    # Performance Telemetry Dashboard Output
+    console.print("\n[bold cyan][YATA] Performance Metrics[/bold cyan]\n")
+    console.print(f"HUNTER Discovery:         {t_hunter_discovery:.1f}s")
+    console.print(f"HUNTER Attack Eval:       {t_hunter_attack:.1f}s\n")
+    console.print(f"HEALER Patch Generation: {t_healer_patch:.1f}s\n")
+    console.print(f"VALIDATOR Verification:   {t_validator_verification:.1f}s\n")
+    console.print(f"LLM Requests:             {llm_requests}")
+    console.print(f"LLM Time:                {llm_time:.1f}s")
+    console.print(f"Average Response:         {avg_llm_response:.1f}s\n")
+    console.print(f"Report Generation:        {t_report_generation:.1f}s\n")
+    console.print(f"TOTAL Runtime:           {t_total_runtime:.1f}s")
+
+    # Runtime Warnings
+    if t_total_runtime > 120:
+        console.print("\n[bold red][YATA] Critical Runtime Warning[/bold red]\n")
+        console.print("Assessment duration may impact interactive workflows.")
+    elif t_total_runtime > 60:
+        console.print("\n[bold yellow][YATA] Performance Warning[/bold yellow]\n")
+        console.print("Repository assessment exceeded recommended runtime.")
+        console.print("Consider provider fallback or reducing attack library size.")
+    console.print()
 
     console.print("[bold cyan][YATA] Security assessment complete.[/bold cyan]")
     cleaned_report_paths = {k: _clean_path(v) for k, v in report_paths.items()}

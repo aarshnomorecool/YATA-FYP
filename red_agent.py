@@ -393,6 +393,16 @@ class RedAgent:
         if payload is None:
             payload = self.generate_exploit_payload(finding)
         attack_path, fallback_explanation = self._build_attack_context(finding, payload)
+        if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
+            print("[HUNTER]")
+            print("Using deterministic attack strategy.")
+            return AttackPlan(
+                finding=finding,
+                payload=payload,
+                attack_path=attack_path,
+                explanation=fallback_explanation,
+                used_llm=False,
+            )
         llm_response = self.llm.generate(
             system_prompt=(
                 "You are the RED agent in YATA. Explain a concrete software attack path using only the "
