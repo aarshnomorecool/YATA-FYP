@@ -194,6 +194,103 @@ class HardcodedSecretPatchStrategy(PatchStrategy):
         return line[: len(line) - len(line.lstrip())]
 
 
+class CommandInjectionPatchStrategy(PatchStrategy):
+    vulnerability_type = "Command Injection"
+
+    def apply_source(self, source: str, finding: VulnerabilityFinding) -> str:
+        metadata = finding.metadata
+        safe_args = metadata.get("safe_args")
+        execute_line = int(metadata.get("execute_line", finding.line_number))
+        end_execute_line = int(metadata.get("end_execute_line", execute_line))
+        func_name = str(metadata.get("func_name", "os.system"))
+        call_src = str(metadata.get("call_src", ""))
+        first_arg_src = str(metadata.get("first_arg_src", ""))
+
+        lines = source.splitlines()
+        indent = self._line_indent(lines, execute_line)
+
+        # Build replacement call
+        if safe_args:
+            args_str = ", ".join(safe_args)
+        else:
+            param = metadata.get("parameter_names", ["cmd"])
+            param_name = param[0] if param else "cmd"
+            args_str = param_name
+
+        if func_name.startswith("subprocess.") or func_name in ("run", "Popen", "check_output", "call"):
+            # Subprocess call. We replace the call source in the line.
+            if call_src and first_arg_src:
+                new_call_src = call_src.replace(first_arg_src, f"[{args_str}]", 1)
+                new_call_src = re.sub(r"\bshell\s*=\s*True\b", "shell=False", new_call_src)
+                
+                segment = "\n".join(lines[execute_line - 1 : end_execute_line])
+                if call_src in segment:
+                    new_segment = segment.replace(call_src, new_call_src, 1)
+                else:
+                    new_segment = f"{indent}{new_call_src}"
+                lines[execute_line - 1 : end_execute_line] = new_segment.splitlines()
+            else:
+                lines[execute_line - 1 : end_execute_line] = [f"{indent}subprocess.run([{args_str}], shell=False)"]
+        elif func_name in ("os.popen", "popen"):
+            # stream = subprocess.Popen(["ping", host], shell=False, stdout=subprocess.PIPE, text=True)
+            lines[execute_line - 1 : end_execute_line] = [f"{indent}import subprocess; stream = subprocess.Popen([{args_str}], shell=False, stdout=subprocess.PIPE, text=True)"]
+        else:
+            # os.system(cmd) -> subprocess.run(["ping", host], shell=False)
+            lines[execute_line - 1 : end_execute_line] = [f"{indent}subprocess.run([{args_str}], shell=False)"]
+
+        patched = "\n".join(lines)
+        if source.endswith("\n"):
+            patched += "\n"
+
+        return self._ensure_subprocess_import(patched)
+
+    def is_safe(self, source: str, finding: VulnerabilityFinding) -> bool:
+        normalized = source.replace("\t", "    ")
+        return "shell=False" in normalized or "subprocess.run" in normalized or "subprocess.Popen" in normalized
+
+    def build_summary(self, original: str, patched: str) -> str:
+        if original == patched:
+            return "No changes were required; the execution path already appeared safe."
+        return "Replaced unsafe shell execution with secure subprocess.run/Popen call (shell=False)."
+
+    def fallback_guidance(self) -> tuple[str, str]:
+        return (
+            "Mitigation: Replace unsafe shell execution (shell=True, os.system, os.popen) with secure subprocess.run calls using shell=False and argument lists.",
+            "Defense Strategy: Standardize on subprocess.run with shell=False, passing command and arguments as a list to prevent shell command injection.",
+        )
+
+    def _ensure_subprocess_import(self, source: str) -> str:
+        if re.search(r"^\s*import subprocess\b", source, re.MULTILINE) or re.search(r"^\s*from subprocess import\b", source, re.MULTILINE):
+            return source
+
+        lines = source.splitlines()
+        insert_at = 0
+        try:
+            tree = ast.parse(source)
+            for node in tree.body:
+                if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                    insert_at = max(insert_at, getattr(node, "end_lineno", node.lineno))
+                    continue
+                if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                    insert_at = max(insert_at, getattr(node, "end_lineno", node.lineno))
+                    continue
+                break
+        except Exception:
+            insert_at = 0
+
+        lines.insert(insert_at, "import subprocess")
+        patched = "\n".join(lines)
+        if source.endswith("\n"):
+            patched += "\n"
+        return patched
+
+    def _line_indent(self, lines: list[str], line_number: int) -> str:
+        if not (0 <= line_number - 1 < len(lines)):
+            return ""
+        line = lines[line_number - 1]
+        return line[: len(line) - len(line.lstrip())]
+
+
 class BlueAgent:
     def __init__(
         self,
@@ -205,6 +302,7 @@ class BlueAgent:
         self.strategies = strategies or {
             SQLInjectionPatchStrategy.vulnerability_type: SQLInjectionPatchStrategy(),
             HardcodedSecretPatchStrategy.vulnerability_type: HardcodedSecretPatchStrategy(),
+            CommandInjectionPatchStrategy.vulnerability_type: CommandInjectionPatchStrategy(),
         }
         self.verbose = False
 
@@ -290,7 +388,7 @@ class BlueAgent:
             "SQL Injection": "implemented",
             "Hardcoded Secrets": "implemented",
             "Cross-Site Scripting": "framework-ready, patch strategy pending",
-            "Command Injection": "framework-ready, patch strategy pending",
+            "Command Injection": "implemented",
             "Path Traversal": "framework-ready, patch strategy pending",
         }
 

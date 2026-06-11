@@ -30,7 +30,7 @@ VULNERABILITY_MAPPING = {
     "Command Injection": {
         "owasp": "A03:2021 – Injection",
         "cwe": "CWE-78",
-        "impact": "Remote code execution, Full system takeover",
+        "impact": "Remote Command Execution, Privilege Escalation, System Enumeration, Data Exfiltration",
         "severity": "CRITICAL",
     },
     "Path Traversal": {

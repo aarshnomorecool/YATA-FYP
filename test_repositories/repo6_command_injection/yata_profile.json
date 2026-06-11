@@ -1,0 +1,10 @@
+{
+  "command_injection": {
+    "path": "/ping",
+    "method": "POST",
+    "params": {
+      "host": "__PAYLOAD__"
+    },
+    "expected_status": 200
+  }
+}

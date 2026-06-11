@@ -347,6 +347,200 @@ class HardcodedSecretDetector(VulnerabilityDetector):
         return f"{secret_value[:3]}...{secret_value[-3:]}"
 
 
+class CommandInjectionDetector(VulnerabilityDetector):
+    vulnerability_type = "Command Injection"
+    detector_id = "cmd_injection.ast-shell-execution"
+
+    def scan(self, source_file: Path) -> list[VulnerabilityFinding]:
+        try:
+            source_text = source_file.read_text(encoding="utf-8")
+            tree = ast.parse(source_text)
+        except Exception:
+            return []
+
+        findings: list[VulnerabilityFinding] = []
+        lines = source_text.splitlines()
+
+        # Track assignments of static string constants
+        constant_vars = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                    var_name = node.targets[0].id
+                    if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                        constant_vars.add(var_name)
+
+        # Track all assignments to check if a variable was assigned to a dynamic string
+        assignments = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                var_name = node.targets[0].id
+                assignments[var_name] = node.value
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+
+            func_name = self._get_func_name(node.func)
+            if func_name is None:
+                continue
+
+            is_vuln_func = False
+            requires_shell = False
+
+            if func_name in ("os.system", "system", "os.popen", "popen"):
+                is_vuln_func = True
+            elif func_name in (
+                "subprocess.run", "run",
+                "subprocess.Popen", "Popen",
+                "subprocess.check_output", "check_output",
+                "subprocess.call", "call"
+            ):
+                is_vuln_func = True
+                requires_shell = True
+
+            if not is_vuln_func:
+                continue
+
+            if requires_shell and not self._has_shell_true(node):
+                continue
+
+            if not node.args:
+                continue
+
+            first_arg = node.args[0]
+            
+            # Resolve variable to its assignment value if it is a Name
+            resolved_node = first_arg
+            if isinstance(first_arg, ast.Name) and first_arg.id in assignments:
+                resolved_node = assignments[first_arg.id]
+
+            if self._is_constant_val(resolved_node, constant_vars):
+                continue
+
+            # Check if it is a safe subprocess list call, e.g. subprocess.run(["ping", host])
+            if isinstance(resolved_node, (ast.List, ast.Tuple)):
+                continue
+
+            # It is dynamic and vulnerable!
+            line_number = getattr(node, "lineno", 1)
+            evidence = lines[line_number - 1].strip() if 0 <= line_number - 1 < len(lines) else ""
+            
+            # Extract call source and first arg source
+            call_src = ast.get_source_segment(source_text, node) or ""
+            first_arg_src = ast.get_source_segment(source_text, first_arg) or ""
+
+            # Attempt to extract safe arguments for HEALER remediation
+            safe_args = self._extract_safe_args(resolved_node)
+
+            parameter_names = []
+            if isinstance(first_arg, ast.Name):
+                parameter_names.append(first_arg.id)
+            elif isinstance(first_arg, ast.JoinedStr):
+                for val in first_arg.values:
+                    if isinstance(val, ast.FormattedValue) and isinstance(val.value, ast.Name):
+                        parameter_names.append(val.value.id)
+
+            findings.append(
+                VulnerabilityFinding(
+                    vulnerability_type=self.vulnerability_type,
+                    severity="CRITICAL",
+                    affected_file=str(source_file),
+                    line_number=line_number,
+                    exploit_payload="&& echo YATA_SUCCESS",
+                    evidence=evidence,
+                    detector_id=self.detector_id,
+                    metadata={
+                        "execute_line": line_number,
+                        "end_execute_line": getattr(node, "end_lineno", line_number),
+                        "func_name": func_name,
+                        "call_src": call_src,
+                        "first_arg_src": first_arg_src,
+                        "safe_args": safe_args,
+                        "parameter_names": parameter_names,
+                    }
+                )
+            )
+
+        return findings
+
+    def _get_func_name(self, node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            return f"{node.value.id}.{node.attr}"
+        return None
+
+    def _has_shell_true(self, node: ast.Call) -> bool:
+        for kw in node.keywords:
+            if kw.arg == "shell":
+                if isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                    return True
+        return False
+
+    def _is_constant_val(self, node: ast.AST, constant_vars: set[str]) -> bool:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return True
+        if isinstance(node, ast.Name) and node.id in constant_vars:
+            return True
+        return False
+
+    def _extract_safe_args(self, node: ast.AST) -> list[str] | None:
+        if isinstance(node, ast.JoinedStr):
+            parts = []
+            for value in node.values:
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    for word in value.value.split():
+                        parts.append(f'"{word}"')
+                elif isinstance(value, ast.FormattedValue) and isinstance(value.value, ast.Name):
+                    parts.append(value.value.id)
+            return parts
+
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            flattened = self._flatten_concat(node)
+            if flattened is None:
+                return None
+            parts = []
+            for part_type, val in flattened:
+                if part_type == "text":
+                    for word in val.split():
+                        parts.append(f'"{word}"')
+                else:
+                    parts.append(val)
+            return parts
+
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+            template = node.func.value.value if isinstance(node.func.value, ast.Constant) and isinstance(node.func.value.value, str) else None
+            if template is None:
+                return None
+            words = template.split()
+            parts = []
+            arg_idx = 0
+            for word in words:
+                if "{}" in word or "{" in word:
+                    if arg_idx < len(node.args) and isinstance(node.args[arg_idx], ast.Name):
+                        parts.append(node.args[arg_idx].id)
+                        arg_idx += 1
+                else:
+                    parts.append(f'"{word}"')
+            return parts
+
+        return None
+
+    def _flatten_concat(self, node: ast.AST) -> list[tuple[str, str]] | None:
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = self._flatten_concat(node.left)
+            right = self._flatten_concat(node.right)
+            if left is None or right is None:
+                return None
+            return [*left, *right]
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return [("text", node.value)]
+        if isinstance(node, ast.Name):
+            return [("param", node.id)]
+        return None
+
+
 class RedAgent:
     def __init__(
         self,
@@ -355,7 +549,7 @@ class RedAgent:
         detectors: list[VulnerabilityDetector] | None = None,
     ) -> None:
         self.llm = llm_client or LLMClient()
-        self.detectors = detectors or [SQLInjectionDetector(), HardcodedSecretDetector()]
+        self.detectors = detectors or [SQLInjectionDetector(), HardcodedSecretDetector(), CommandInjectionDetector()]
         self.attack_library = AttackLibrary()
         self.verbose = False
 
@@ -436,7 +630,7 @@ class RedAgent:
             "SQL Injection": "implemented",
             "Hardcoded Secrets": "implemented",
             "Cross-Site Scripting": "framework-ready, detector pending",
-            "Command Injection": "framework-ready, detector pending",
+            "Command Injection": "implemented",
             "Path Traversal": "framework-ready, detector pending",
         }
 
@@ -451,6 +645,17 @@ class RedAgent:
             fallback_explanation = (
                 "Rule-based assessment: a credential-like string is embedded directly in source code, so anyone "
                 "with repository or artifact access can extract and reuse it without breaching runtime controls."
+            )
+            return attack_path, fallback_explanation
+
+        if finding.vulnerability_type == "Command Injection":
+            attack_path = (
+                f"Send the payload {payload!r} to the command injection vulnerable endpoint to execute "
+                f"arbitrary commands on the host system."
+            )
+            fallback_explanation = (
+                "Rule-based assessment: user-supplied input is directly passed to shell-executing functions "
+                "without sanitization, allowing metacharacters to spawn additional commands."
             )
             return attack_path, fallback_explanation
 

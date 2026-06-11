@@ -77,7 +77,7 @@ class Referee:
             "SQL Injection": "implemented",
             "Hardcoded Secrets": "implemented",
             "Cross-Site Scripting": "framework-ready, verification strategy pending",
-            "Command Injection": "framework-ready, verification strategy pending",
+            "Command Injection": "implemented",
             "Path Traversal": "framework-ready, verification strategy pending",
         }
 
@@ -154,6 +154,48 @@ class Referee:
             attack_succeeded=attack_succeeded,
             status_code=200 if attack_succeeded else 204,
             response_text=source,
+            evidence=evidence,
+        )
+
+    def _verify_command_injection(self, app_root: Path, finding: VulnerabilityFinding, payload: str) -> VerificationResult:
+        app_module = self._load_app_module(app_root / "app.py")
+        app = app_module.create_app(str(app_root / "database.db"))
+        profile = self._load_profile(app_root).get("command_injection", {})
+        method = str(profile.get("method", "POST")).upper()
+        path = str(profile.get("path", "/ping"))
+        params = dict(profile.get("params", {"host": "__PAYLOAD__"}))
+        success_status_code = int(profile.get("expected_status", 200))
+
+        request_values = {
+            key: payload if value == "__PAYLOAD__" else value
+            for key, value in params.items()
+        }
+
+        with app.test_client() as client:
+            if method == "GET":
+                response = client.get(path, query_string=request_values, follow_redirects=True)
+            else:
+                response = client.post(path, data=request_values, follow_redirects=True)
+
+        body = response.get_data(as_text=True)
+
+        import getpass
+        username = getpass.getuser()
+        is_yata_success = "YATA_SUCCESS" in body
+        is_id = "uid=" in body or "gid=" in body
+        is_user = username.lower() in body.lower()
+        is_dir = any(x in body for x in ("app.py", "database.db", "yata_profile.json", "yata.py", "red_agent.py", "blue_agent.py"))
+
+        attack_succeeded = (is_yata_success or is_id or is_user or is_dir) and response.status_code == success_status_code
+        evidence = (
+            f"Runtime exploit reproduced against {path}; the payload executed command successfully."
+            if attack_succeeded
+            else "Runtime exploit no longer executed command successfully."
+        )
+        return VerificationResult(
+            attack_succeeded=attack_succeeded,
+            status_code=response.status_code,
+            response_text=body,
             evidence=evidence,
         )
 

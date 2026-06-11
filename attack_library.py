@@ -14,6 +14,20 @@ class AttackLibrary:
                 "INCORRECT_KEY",
                 "GENERIC_TOKEN",
                 "{winning_payload}"
+            ],
+            "Command Injection": [
+                "; whoami",
+                "&& whoami",
+                "; dir",
+                "&& dir",
+                "| whoami",
+                "| dir",
+                "& whoami",
+                "& dir",
+                "; hostname",
+                "&& hostname",
+                "; echo YATA_SUCCESS",
+                "&& echo YATA_SUCCESS"
             ]
         }
 
