@@ -1,182 +1,417 @@
 # YATA — Yet Another Threat Antagonist
 
-> An autonomous agent that attacks your codebase, patches every vulnerability it finds, then tries to break its own fixes. No human required.
+> An autonomous cybersecurity agent that discovers vulnerabilities, proves exploitability, generates patches, attacks its own fixes, and learns from every assessment.
 
-```
-git clone <repository-url> && cd yata
-pip install -r requirements.txt
-python yata.py --demo
-```
-
----
-
-## What YATA Does
-
-Most security tools find problems. YATA fixes them.
-
-YATA runs three agents in an adversarial loop against your Python repository. HUNTER breaks in. HEALER patches the breach. VALIDATOR — running the same offensive configuration as HUNTER — tries to break the patch. The loop repeats until YATA cannot defeat itself.
-
-```
-HUNTER   →  finds and exploits weaknesses
-HEALER   →  generates and applies secure patches
-VALIDATOR  →  attacks the patched code
-              ↓ if breakthrough → back to HEALER
-              ↓ if blocked      → repository secured
-```
-
-When the run ends, your repository is either secure or YATA tells you exactly why it isn't.
-
----
-
-## The Adversarial Loop
-
-YATA does not scan and report. It attacks.
-
-```
-[HUNTER]    Evaluating attack paths...
-              └─ SQL payloads loaded: 7
-              └─ Trying payload 1/7 ... FAIL
-              └─ Trying payload 2/7 ... FAIL
-              └─ Trying payload 3/7 ... SUCCESS ✓
-              └─ Payload: ' OR '1'='1
-
-[HEALER]    Generating secure patch...
-              └─ Vulnerability confirmed by HUNTER
-              └─ Patch written → .yata/patches/login.py
-
-[VALIDATOR] Attacking patched code...
-              └─ Re-attempting SQL injection ... BLOCKED ✓
-              └─ Security score: 23 → 91
-
-YATA complete. Repository secured.
-Human interventions: 0
-```
-
-Every finding is proven exploitable before a patch is generated. Every patch is attacked before it is accepted.
-
----
-
-## Agents
-
-| Agent | Role | Behaviour |
-|---|---|---|
-| HUNTER | Offensive | Aggressive. Tries every payload. Confirms exploitability before reporting. |
-| HEALER | Defensive | Conservative. Writes minimal patches. Critiques its own output before committing. |
-| VALIDATOR | Adversarial | Identical configuration to HUNTER. Attacks the patched code with fresh reasoning. |
-
-HUNTER and VALIDATOR share the same offensive configuration. A patch does not pass until VALIDATOR — thinking exactly like HUNTER — cannot break it.
-
----
-
-## Quick Start
-
-**Clone and install:**
 ```bash
-git clone <repository-url>
+git clone aarshnomorecool/yata.git
 cd yata
+
 python -m venv .venv
 
 # Windows
 .venv\Scripts\activate
 
-# Linux / macOS
-source .venv/bin/activate
+pip install -e .
 
-pip install -r requirements.txt
+yata --demo
 ```
 
-**Run the demo (no API key required):**
+---
+
+## What is YATA?
+
+YATA (Yet Another Threat Antagonist) is an autonomous security assessment and remediation platform.
+
+Unlike traditional scanners that stop at detection, YATA executes a complete offensive-to-defensive security workflow:
+
+```text
+Discover Vulnerability
+        ↓
+Prove Exploitability
+        ↓
+Generate Patch
+        ↓
+Apply Patch
+        ↓
+Attack Patch
+        ↓
+Validate Security
+        ↓
+Learn & Remember
+```
+
+A vulnerability is not considered real until YATA proves it can exploit it.
+
+A patch is not considered secure until YATA fails to break it.
+
+---
+
+## Core Agents
+
+### HUNTER
+
+Offensive security agent.
+
+Responsibilities:
+
+- Discover vulnerabilities
+- Build attack paths
+- Execute payloads
+- Prove exploitability
+
+---
+
+### HEALER
+
+Defensive remediation agent.
+
+Responsibilities:
+
+- Generate secure patches
+- Apply minimal code changes
+- Preserve functionality
+- Produce validated fixes
+
+---
+
+### VALIDATOR
+
+Adversarial validation agent.
+
+Responsibilities:
+
+- Re-run exploit chains
+- Attack generated patches
+- Verify exploit prevention
+- Confirm remediation success
+
+---
+
+### LEARNER
+
+Repository memory agent.
+
+Responsibilities:
+
+- Track assessment history
+- Record vulnerability trends
+- Track patch success rates
+- Maintain repository knowledge
+
+Repository memory is stored locally:
+
+```text
+.yata/memory/
+```
+
+---
+
+## Assessment Workflow
+
+```text
+HUNTER
+  ↓
+HEALER
+  ↓
+VALIDATOR
+  ↓
+LEARNER
+```
+
+Security Score:
+
+```text
+Before Assessment
+      ↓
+Vulnerabilities Found
+      ↓
+Patches Generated
+      ↓
+Validation Passed
+      ↓
+Score Updated
+```
+
+---
+
+## Supported Vulnerabilities
+
+| Vulnerability             | Detect | Exploit | Patch | Validate |
+| ------------------------- | ------ | ------- | ----- | -------- |
+| SQL Injection             | ✓      | ✓       | ✓     | ✓        |
+| Hardcoded Secret Exposure | ✓      | ✓       | ✓     | ✓        |
+| Command Injection         | ✓      | ✓       | ✓     | ✓        |
+| Path Traversal            | ✓      | ✓       | ✓     | ✓        |
+
+---
+
+## Execution Modes
+
+### SAFE
+
 ```bash
-python yata.py --demo
+yata assess <repository> --safe
 ```
 
-**Run against your own repository:**
+- Creates patched copies
+- Original files untouched
+- Recommended mode
+
+---
+
+### APPLY
+
 ```bash
-python yata.py
+yata assess <repository> --apply
 ```
 
-Select a mode, provide a path, and YATA handles the rest.
+- Applies validated patches directly
+- Updates repository files
 
 ---
 
-## Modes
+### INTERACTIVE
 
-```
-> SAFE          patched copy created, original untouched
-  APPLY         verified patch applied directly to original
-  INTERACTIVE   approve or reject each patch individually
+```bash
+yata assess <repository> --interactive
 ```
 
-All three modes run the full adversarial loop. The only difference is what happens to your files after a patch passes VALIDATOR.
+- Requests approval before patching
+- Human-in-the-loop workflow
 
 ---
 
-## Workspace
+## Native CLI Commands
 
-Every scanned repository gets a `.yata/` directory:
+### Assess Repository
 
+```bash
+yata assess <repository> --safe
 ```
-your-repo/
-└── .yata/
-    ├── patches/        verified patch files
-    ├── reports/        run reports (terminal + HTML)
-    ├── scans/          findings.json with full attack history
-    └── logs/           execution logs per run
-```
-
-`findings.json` stores every payload attempted, the winning payload, and the patch that blocked it. Nothing is discarded.
 
 ---
 
-## Coverage
+### Discover Repositories
 
-| Vulnerability | Detect | Exploit | Patch | Verify | OWASP |
-|---|:---:|:---:|:---:|:---:|---|
-| SQL Injection | ✅ | ✅ | ✅ | ✅ | A03:2021 · CWE-89 |
-| Hardcoded Secrets | ✅ | ✅ | ✅ | ✅ | A02:2021 · CWE-798 |
-| Command Injection | 🔜 | 🔜 | 🔜 | 🔜 | A03:2021 · CWE-78 |
-| Path Traversal | 🔜 | 🔜 | 🔜 | 🔜 | A01:2021 · CWE-22 |
-
-YATA covers full detect–exploit–patch–verify cycles. Detection without exploitation is not a finding.
+```bash
+yata discover <path>
+```
 
 ---
 
-## LLM Configuration
+### Repository Memory
 
-YATA uses `qwen/qwen3-next-80b-a3b-instruct` via NVIDIA NIM by default.
+```bash
+yata memory <repository>
+```
 
-To enable it:
+---
+
+### Assessment History
+
+```bash
+yata history <repository>
+```
+
+---
+
+### Latest Report
+
+```bash
+yata report <repository>
+```
+
+---
+
+### Platform Status
+
+```bash
+yata status
+```
+
+---
+
+### Version
+
+```bash
+yata version
+```
+
+---
+
+### Help
+
+```bash
+yata help
+```
+
+---
+
+## Repository Discovery
+
+YATA can automatically discover repositories within a workspace.
+
+Example:
+
+```bash
+yata discover test_repositories
+```
+
+Output:
+
+```text
+repo1_login_sqli
+repo2_search_sqli
+repo3_admin_sqli
+repo4_hardcoded_secret
+repo5_mixed
+repo6_command_injection
+repo7_path_traversal
+```
+
+---
+
+## Repository Memory
+
+Each repository develops a persistent security history.
+
+Stored under:
+
+```text
+.yata/memory/<repository>/memory.json
+```
+
+Tracked metrics:
+
+- Total Assessments
+- Best Security Score
+- Last Security Score
+- Vulnerabilities Seen
+- Successful Patches
+- Failed Patches
+- Assessment Timeline
+
+---
+
+## Reports
+
+YATA generates:
+
+### Terminal Reports
+
+Rich CLI summaries.
+
+### HTML Reports
+
+Containing:
+
+- Executive Summary
+- Security Score Evolution
+- Vulnerabilities Found
+- Exploits Proven
+- Patches Applied
+- Validation Results
+- Timeline
+- Agent Status
+- Metrics
+- Repository History
+
+---
+
+## Demo Mode
+
+No API key required.
+
+```bash
+yata --demo
+```
+
+Demonstrates:
+
+- SQL Injection
+- Hardcoded Secret Exposure
+- Autonomous Patch Generation
+- Validation Loop
+- Repository Memory
+
+---
+
+## NVIDIA Assisted Mode
+
+Default model:
+
+```text
+qwen/qwen3-next-80b-a3b-instruct
+```
+
+Configure:
+
 ```bash
 cp .env.example .env
-# add your NVIDIA API key
 ```
 
-If no key is present, YATA falls back to deterministic local behaviour automatically. Demo mode requires no configuration.
+Add:
+
+```text
+NVIDIA_API_KEY=<your-key>
+```
 
 ---
 
-## Roadmap
+## Autonomous Fallback Mode
 
-- [x] SQL Injection
-- [x] Hardcoded Secrets
-- [x] Multi-payload attack library
-- [x] Adversarial validation loop
-- [x] Workspace architecture
-- [x] Demo mode
-- [ ] Command Injection
-- [ ] Path Traversal
-- [ ] Cross-Site Scripting
-- [ ] Repository memory and learning
-- [ ] GitHub PR automation
+If no API key is available:
+
+```text
+LLM Requests = 0
+```
+
+YATA automatically switches to deterministic local engines.
+
+No functionality is lost.
+
+---
+
+## Current Roadmap
+
+### Completed
+
+- ✓ SQL Injection
+- ✓ Hardcoded Secret Detection
+- ✓ Command Injection
+- ✓ Path Traversal
+- ✓ Adversarial Validation
+- ✓ Repository Memory
+- ✓ Git-Style Commands
+- ✓ Native CLI Installation
+- ✓ HTML Reporting
+- ✓ Multi-Repository Assessment
+
+### Planned
+
+- Repository Discovery v2
+- Assess-All Workspaces
+- Cross-Site Scripting (XSS)
+- SSRF
+- Watch Mode
+- GitHub Pull Request Automation
 
 ---
 
 ## FAR AWAY 2026
 
-YATA is submitted under the **Agentic & Autonomous Systems** theme.
+Submitted under:
 
-The core claim: a security agent that is only as trustworthy as its ability to defeat itself. YATA does not accept a patch until its own offensive reasoning cannot break it.
+```text
+Agentic & Autonomous Systems
+```
+
+YATA's core principle:
+
+> A security agent is only as trustworthy as its ability to defeat itself.
+
+Every patch must survive an attack from YATA's own offensive engine before it is accepted.
 
 ---
 
-*Built by Team Seasaw.*
+Built by Team Seasaw.

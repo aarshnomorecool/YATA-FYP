@@ -126,9 +126,8 @@ class RepositoryRunSummary:
     human_interventions: int
 
 
-def main(argv: list[str] | None = None) -> int:
+def assess_entrypoint(args: argparse.Namespace) -> int:
     start_time_all = time.time()
-    args = _parse_args(argv)
 
     banner = """
 ██╗   ██╗ █████╗ ████████╗ █████╗ 
@@ -345,17 +344,54 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if all(summary.battle_status == "complete" for summary in summaries) else 1
 
 
+def dispatch_command(args: argparse.Namespace) -> int:
+    if args.command in ("assess", "scan"):
+        from commands import assess
+        return assess.run(args)
+    elif args.command == "discover":
+        from commands import discover
+        return discover.run(args)
+    elif args.command == "memory":
+        from commands import memory
+        return memory.run(args)
+    elif args.command == "history":
+        from commands import history
+        return history.run(args)
+    elif args.command == "report":
+        from commands import report
+        return report.run(args)
+    elif args.command == "status":
+        from commands import status
+        return status.run(args)
+    elif args.command == "version":
+        from commands import version
+        return version.run(args)
+    elif args.command == "help":
+        from commands import help as help_cmd
+        return help_cmd.run(args)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    return dispatch_command(args)
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     raw_args = list(sys.argv[1:] if argv is None else argv)
-    if raw_args and raw_args[0] not in ("scan", "assess"):
-        raw_args = ["assess", *raw_args]
-    elif not raw_args:
+    
+    subcommands = {"assess", "scan", "discover", "memory", "history", "report", "status", "version", "help"}
+    
+    if not raw_args:
         raw_args = ["assess"]
+    elif raw_args[0] not in subcommands and raw_args[0] not in ("-h", "--help"):
+        raw_args = ["assess", *raw_args]
 
-    parser = argparse.ArgumentParser(description="YATA - Yet Another Threat Antagonist autonomous cyber immune system")
+    parser = argparse.ArgumentParser(description="YATA - Yet Another Threat Antagonist CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    assess_parser = subparsers.add_parser("assess", aliases=["scan"], help="Assess one repository or a directory of repositories")
+    # 1. assess
+    assess_parser = subparsers.add_parser("assess", aliases=["scan"], help="Assess a repository or directory of repositories")
     assess_parser.add_argument("target", nargs="?", default=None, help="Repository path or a directory containing repositories")
     assess_parser.add_argument("--demo", action="store_true", help="Run in demo mode with bundled repositories")
     
@@ -363,6 +399,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     mode_group.add_argument("--safe", action="store_true", help="Patch and verify on safe copies only")
     mode_group.add_argument("--apply", action="store_true", help="Apply verified patches automatically")
     mode_group.add_argument("--interactive", action="store_true", help="User approves each patch")
+    
     assess_parser.add_argument(
         "--max-rounds",
         type=int,
@@ -373,16 +410,43 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     assess_parser.add_argument("--live", action="store_true", help="Enable live feedback mode (future feature placeholder)")
     assess_parser.add_argument("--quiet", action="store_true", help="Run in quiet mode (future feature placeholder)")
 
+    # 2. discover
+    discover_parser = subparsers.add_parser("discover", help="Discover repositories in a directory path")
+    discover_parser.add_argument("target", help="Directory path to scan recursively")
+
+    # 3. memory
+    memory_parser = subparsers.add_parser("memory", help="Display memory statistics for a repository")
+    memory_parser.add_argument("target", help="Repository name")
+
+    # 4. history
+    history_parser = subparsers.add_parser("history", help="Display chronological history for a repository")
+    history_parser.add_argument("target", help="Repository name")
+
+    # 5. report
+    report_parser = subparsers.add_parser("report", help="Locate the newest report for a repository")
+    report_parser.add_argument("target", help="Repository name")
+
+    # 6. status
+    subparsers.add_parser("status", help="Display aggregate platform status")
+
+    # 7. version
+    subparsers.add_parser("version", help="Display version and capability checklist")
+
+    # 8. help
+    help_parser = subparsers.add_parser("help", help="Display YATA CLI help")
+    help_parser.add_argument("subcommand", nargs="?", default=None, help="Optional subcommand to show help for")
+
     args = parser.parse_args(raw_args)
 
-    if getattr(args, "apply", False):
-        args.mode = "apply"
-    elif getattr(args, "interactive", False):
-        args.mode = "interactive"
-    elif getattr(args, "safe", False):
-        args.mode = "safe"
-    else:
-        args.mode = None
+    if args.command in ("assess", "scan"):
+        if getattr(args, "apply", False):
+            args.mode = "apply"
+        elif getattr(args, "interactive", False):
+            args.mode = "interactive"
+        elif getattr(args, "safe", False):
+            args.mode = "safe"
+        else:
+            args.mode = None
     return args
 
 

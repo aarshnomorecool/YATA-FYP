@@ -9,6 +9,11 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Packaging
+*.egg-info/
+build/
+dist/
+
 # Local environments
 .env
 .env.*
@@ -16,4 +21,6 @@ __pycache__/
 
 # SQLite databases generated during testing
 *.db
+
+# Virtual environments
 .venv/
