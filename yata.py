@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
+from rich.align import Align
 
 from blue_agent import BlueAgent, PatchResult
 from red_agent import AttackPlan, RedAgent, VulnerabilityFinding
@@ -137,32 +138,17 @@ def main(argv: list[str] | None = None) -> int:
    ██║   ██║  ██║   ██║   ██║  ██║
    ╚═╝   ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝
 """
-    splash_text = (
-        f"[bold red]{banner}[/bold red]\n"
-        f"[bold white]       YATA (Yet Another Threat Antagonist)[/bold white]\n"
-        f"        [dim]Autonomous Cyber Defense & Patching Agent[/dim]\n"
+    banner_lines = [line for line in banner.split("\n") if line.strip()]
+    logo_block = "\n".join(banner_lines)
+
+    splash_group = Group(
+        Align.center(f"[bold red]{logo_block}[/bold red]"),
+        Align.center(""),
+        Align.center("[bold white]Yet Another Threat Antagonist[/bold white]"),
+        Align.center("[dim]Autonomous Cyber Defense & Patching Agent[/dim]")
     )
     if not args.quiet:
-        console.print(Panel(splash_text, border_style="bold red", expand=False))
-
-        pitch_content = (
-            "[bold white]Yet Another Threat Antagonist[/bold white]\n\n"
-            "An autonomous security agent that:\n\n"
-            "• [bold cyan]Finds vulnerabilities[/bold cyan]\n"
-            "• [bold cyan]Proves exploitability[/bold cyan]\n"
-            "• [bold cyan]Generates patches[/bold cyan]\n"
-            "• [bold cyan]Attacks its own fixes[/bold cyan]"
-        )
-        console.print(Panel(pitch_content, border_style="cyan", expand=False))
-
-        kb_content = (
-            "[bold white]Knowledge Base[/bold white]\n\n"
-            "Status:\n"
-            "[green]Active (v0.7)[/green]\n\n"
-            "Repository Memory:\n"
-            "[green]Enabled[/green]"
-        )
-        console.print(Panel(kb_content, border_style="yellow", expand=False))
+        console.print(Panel(splash_group, border_style="bold red", expand=True))
 
     if args.max_rounds < 1:
         console.print("[red]--max-rounds must be at least 1[/red]")
@@ -186,19 +172,6 @@ def main(argv: list[str] | None = None) -> int:
         
         target_path = dest_demo
         args.mode = "safe"
-        
-        if not args.quiet:
-            temp_client = LLMClient()
-            demo_mode_desc = "NVIDIA Assisted" if temp_client.api_key else "Autonomous Fallback"
-            demo_content = (
-                "[bold white]YATA Demonstration[/bold white]\n\n"
-                "[bold]Target:[/bold]\n"
-                "demo_repo5_mixed\n\n"
-                "[bold]Mode:[/bold]\n"
-                f"{demo_mode_desc}\n\n"
-                "[bold green]Starting Assessment...[/bold green]"
-            )
-            console.print(Panel(demo_content, border_style="magenta", expand=False))
     else:
         if args.mode is None:
             try:
@@ -243,23 +216,51 @@ def main(argv: list[str] | None = None) -> int:
     if not args.quiet:
         if args.verbose:
             console.print(
-                Panel.fit(
+                Panel(
                     f"[bold cyan][YATA] Autonomous Security Assessment Started[/bold cyan]\n"
                     f"[white]Target:[/white] {_clean_path(target_path)}\n"
                     f"[white]Repositories:[/white] {len(repository_roots)}\n"
-                    f"[white]Mode:[/white] {args.mode.upper()}"
+                    f"[white]Mode:[/white] {args.mode.upper() if args.mode else 'AUTO'}",
+                    expand=True
                 )
             )
         else:
-            if not args.demo:
-                mode_str = "NVIDIA Assisted"
-                if LLMClient.execution_mode == "autonomous_fallback":
-                    mode_str = "Autonomous Fallback"
-                elif LLMClient.execution_mode == "demo":
-                    mode_str = "Demo"
-                    
-                console.print(f"Mode: {mode_str}")
-                console.print(f"Target: {target_path.name}\n")
+            mode_str = "NVIDIA Assisted"
+            if LLMClient.execution_mode == "autonomous_fallback":
+                mode_str = "Autonomous Fallback"
+            elif LLMClient.execution_mode == "demo":
+                temp_client = LLMClient()
+                mode_str = "NVIDIA Assisted" if temp_client.api_key else "Autonomous Fallback"
+
+            from learner_agent import LearnerAgent
+            learner = LearnerAgent()
+            if len(repository_roots) == 1:
+                pre_mem = learner.load_memory(repository_roots[0].name)
+                if pre_mem:
+                    pre_assessments = pre_mem.get("total_assessments", 0)
+                    mem_summary = f"{pre_assessments} Assessment{'s' if pre_assessments != 1 else ''}"
+                else:
+                    mem_summary = "First Assessment"
+            else:
+                total_assessments = 0
+                all_first = True
+                for root in repository_roots:
+                    pre_mem = learner.load_memory(root.name)
+                    if pre_mem:
+                        total_assessments += pre_mem.get("total_assessments", 0)
+                        all_first = False
+                if all_first:
+                    mem_summary = "First Assessment"
+                else:
+                    mem_summary = f"{total_assessments} Assessment{'s' if total_assessments != 1 else ''}"
+
+            startup_content = (
+                f"Mode: {mode_str}\n"
+                f"Target: {target_path.name}\n"
+                f"Memory: {mem_summary}"
+            )
+            console.print(Panel(startup_content, border_style="cyan", expand=True))
+            console.print()
 
     if args.verbose and not args.quiet:
         if LLMClient.execution_mode == "demo":
@@ -339,28 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         console.print(table)
         console.print()
 
-        console.print("[bold white]Timeline[/bold white]\n")
-        console.print("[1] Vulnerabilities Discovered")
-        console.print("[2] Exploits Verified")
-        console.print("[3] Patches Generated")
-        console.print("[4] Validation Executed")
-        console.print("[5] Security Score Updated")
-        console.print()
 
-        console.print("[bold white]Assessment Metrics[/bold white]\n")
-        console.print(f"Repositories Assessed: {len(summaries)}")
-        total_found = sum(s.vulnerabilities_found for s in summaries)
-        total_healed = sum(s.vulnerabilities_healed for s in summaries)
-        total_interventions = sum(s.human_interventions for s in summaries)
-        
-        console.print(f"Vulnerabilities Found: {total_found}")
-        console.print(f"Vulnerabilities Patched: {total_healed}")
-        val_success_rate = (total_healed / total_found * 100) if total_found > 0 else 100.0
-        console.print(f"Validation Success Rate: {val_success_rate:.0f}%")
-        console.print(f"Human Interventions: {total_interventions}")
-        
-        total_runtime = time.time() - start_time_all
-        console.print(f"Execution Time: {total_runtime:.0f}s\n")
 
     return 0 if all(summary.battle_status == "complete" for summary in summaries) else 1
 
@@ -485,15 +465,16 @@ def _run_repository(
 
     if not quiet:
         if pre_mem:
-            vulns_list = "\n".join(f"• {vtype}" for vtype in pre_mem.get("vulnerabilities_seen", {}).keys())
+            vulns_list = ", ".join(pre_mem.get("vulnerabilities_seen", {}).keys())
+            if not vulns_list:
+                vulns_list = "None"
             mem_text = (
                 "[bold white]Repository Memory[/bold white]\n\n"
-                f"Previous Assessments: {pre_assessments}\n\n"
-                f"Last Score: {pre_mem.get('last_score', 0)}\n\n"
-                "Known Vulnerabilities:\n"
-                f"{vulns_list}"
+                f"Assessments: {pre_assessments}\n"
+                f"Last Score: {pre_mem.get('last_score', 0)}\n"
+                f"Known Vulnerabilities: {vulns_list}"
             )
-            console.print(Panel(mem_text, border_style="yellow", expand=False))
+            console.print(Panel(mem_text, border_style="yellow", expand=True))
             console.print()
         else:
             mem_text = (
@@ -501,7 +482,7 @@ def _run_repository(
                 "First Assessment\n"
                 "No Prior Knowledge"
             )
-            console.print(Panel(mem_text, border_style="yellow", expand=False))
+            console.print(Panel(mem_text, border_style="yellow", expand=True))
             console.print()
 
     reports_dir = yata_dir / "reports" / repo_name
@@ -551,7 +532,7 @@ def _run_repository(
 
     for round_number in range(1, max_rounds + 1):
         if verbose:
-            console.print(Panel(f"[bold magenta]Assessment Round {round_number}[/bold magenta]", border_style="magenta", expand=False))
+            console.print(Panel(f"[bold magenta]Assessment Round {round_number}[/bold magenta]", border_style="magenta", expand=True))
             console.print("[bold red][HUNTER][/bold red] Evaluating attack paths...")
 
         start_disc = time.time()
@@ -1149,56 +1130,29 @@ def _print_assessment_summary_pass(
         "[bold]Reports Generated:[/bold]\n"
         "✓"
     )
-    console.print(Panel(card_content, border_style="cyan", expand=False))
+    console.print(Panel(card_content, border_style="cyan", expand=True))
     console.print()
 
     # End-of-Run Learning Summary
     if post_mem is not None:
         if pre_assessments == 0:
-            summary_text = "[bold white]Repository Learning Created[/bold white]"
+            summary_text = (
+                "[bold white]Repository Learning Created[/bold white]\n\n"
+                f"Assessments: {post_mem['total_assessments']}\n"
+                f"Last Score: {post_mem['last_score']}\n"
+                f"Known Vulnerabilities: {sum(post_mem['vulnerabilities_seen'].values())}"
+            )
         else:
             summary_text = (
                 "[bold white]Repository Learning Updated[/bold white]\n\n"
-                "[bold]Assessments:[/bold]\n"
-                f"{pre_assessments} → {post_mem['total_assessments']}\n\n"
-                "[bold]Last Score:[/bold]\n"
-                f"{post_mem['last_score']}\n\n"
-                "[bold]Known Vulnerabilities:[/bold]\n"
-                f"{sum(post_mem['vulnerabilities_seen'].values())}"
+                f"Assessments: {pre_assessments} → {post_mem['total_assessments']}\n"
+                f"Last Score: {post_mem['last_score']}\n"
+                f"Known Vulnerabilities: {sum(post_mem['vulnerabilities_seen'].values())}"
             )
-        console.print(Panel(summary_text, border_style="green", expand=False))
+        console.print(Panel(summary_text, border_style="green", expand=True))
         console.print()
 
-    # 2. Timeline
-    console.print("[bold white]Timeline[/bold white]\n")
-    if vulnerabilities_found > 1:
-        console.print("[1] Vulnerabilities Discovered")
-        console.print("[2] Exploits Verified")
-        console.print("[3] Patches Generated")
-        console.print("[4] Validation Executed")
-        console.print("[5] Security Score Updated")
-    else:
-        console.print("[1] Vulnerability Found")
-        console.print("[2] Exploit Verified")
-        console.print("[3] Patch Generated")
-        console.print("[4] Validation Executed")
-        if verification_result == 'Passed':
-            console.print("[5] Exploit Blocked")
-        else:
-            console.print("[5] Exploit Bypassed (Patch Failed)")
-    console.print()
-
-    # 3. Agent Status Board
-    console.print("[bold white]Agent Status[/bold white]\n")
-    hunter_status = "✓ COMPLETE"
-    healer_status = "✓ COMPLETE"
-    validator_status = "✓ COMPLETE" if verification_result == "Passed" else "✗ PATCH FAILED"
-    console.print(f"HUNTER      {hunter_status}")
-    console.print(f"HEALER      {healer_status}")
-    console.print(f"VALIDATOR   {validator_status}")
-    console.print()
-
-    # 4. Security Score Evolution
+    # 2. Security Score Evolution
     def make_score_bar(score: int) -> str:
         if score == 0:
             return "░" * 10
@@ -1209,17 +1163,6 @@ def _print_assessment_summary_pass(
     console.print(f"Before   {make_score_bar(initial_score)} {initial_score:>3}\n")
     console.print(f"After    {make_score_bar(final_score)} {final_score:>3}\n")
     console.print(f"Improvement: {final_score - initial_score:+d}\n")
-
-    # 5. Assessment Metrics
-    console.print("[bold white]Assessment Metrics[/bold white]\n")
-    console.print(f"Repositories Assessed: 1")
-    console.print(f"Vulnerabilities Found: {vulnerabilities_found}")
-    console.print(f"Vulnerabilities Patched: {healed_count}")
-    
-    val_success_rate = (healed_count / vulnerabilities_found * 100) if vulnerabilities_found > 0 else 100.0
-    console.print(f"Validation Success Rate: {val_success_rate:.0f}%")
-    console.print(f"Human Interventions: {human_interventions}")
-    console.print(f"Execution Time: {runtime:.0f}s\n")
 
 
 def _print_suite_summary(summaries: list[RepositoryRunSummary]) -> None:
