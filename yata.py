@@ -158,9 +158,9 @@ def main(argv: list[str] | None = None) -> int:
         kb_content = (
             "[bold white]Knowledge Base[/bold white]\n\n"
             "Status:\n"
-            "[yellow]Coming in v0.7[/yellow]\n\n"
+            "[green]Active (v0.7)[/green]\n\n"
             "Repository Memory:\n"
-            "[yellow]Planned[/yellow]"
+            "[green]Enabled[/green]"
         )
         console.print(Panel(kb_content, border_style="yellow", expand=False))
 
@@ -475,6 +475,35 @@ def _run_repository(
     project_root = Path(__file__).resolve().parent
     yata_dir = project_root / ".yata"
     repo_name = repository_root.name
+
+    # Repository Memory load & startup display
+    from learner_agent import LearnerAgent
+    learner = LearnerAgent()
+    pre_mem = learner.load_memory(repo_name)
+    pre_assessments = pre_mem.get("total_assessments", 0) if pre_mem else 0
+    post_mem = None
+
+    if not quiet:
+        if pre_mem:
+            vulns_list = "\n".join(f"• {vtype}" for vtype in pre_mem.get("vulnerabilities_seen", {}).keys())
+            mem_text = (
+                "[bold white]Repository Memory[/bold white]\n\n"
+                f"Previous Assessments: {pre_assessments}\n\n"
+                f"Last Score: {pre_mem.get('last_score', 0)}\n\n"
+                "Known Vulnerabilities:\n"
+                f"{vulns_list}"
+            )
+            console.print(Panel(mem_text, border_style="yellow", expand=False))
+            console.print()
+        else:
+            mem_text = (
+                "[bold white]Repository Memory[/bold white]\n\n"
+                "First Assessment\n"
+                "No Prior Knowledge"
+            )
+            console.print(Panel(mem_text, border_style="yellow", expand=False))
+            console.print()
+
     reports_dir = yata_dir / "reports" / repo_name
     patches_dir = yata_dir / "patches" / repo_name
     analysis_dir = yata_dir / "analysis" / repo_name
@@ -740,6 +769,29 @@ def _run_repository(
     verification_result = "Passed" if battle_status == "complete" and not remaining_findings else "Failed"
     final_score = referee.calculate_security_score(remaining_findings)
 
+    # Run LEARNER Agent to update repository memory
+    successful_patches = []
+    failed_patches = []
+    for rd in round_reports:
+        vtype = rd["finding"]["vulnerability_type"]
+        if rd["referee"]["patch_succeeded"]:
+            successful_patches.append(vtype)
+        else:
+            failed_patches.append(vtype)
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    post_mem = learner.update_memory(
+        repository_name=repo_name,
+        timestamp=today,
+        findings_count=len(discovered_findings),
+        vulnerability_types=[f[0] for f in discovered_findings],
+        successful_patches=successful_patches,
+        failed_patches=failed_patches,
+        initial_score=score_before_all,
+        final_score=final_score,
+        validation_outcome=verification_result
+    )
+
     # Initial Report build
     start_rep = time.time()
     llm_requests = red_agent.llm.llm_requests + blue_agent.llm.llm_requests
@@ -872,7 +924,9 @@ def _run_repository(
                 vulnerabilities_found=len(discovered_findings),
                 verification_result=verification_result,
                 human_interventions=human_interventions,
-                exec_mode=exec_mode_str
+                exec_mode=exec_mode_str,
+                pre_assessments=pre_assessments,
+                post_mem=post_mem
             )
 
         if verbose:
@@ -1075,7 +1129,9 @@ def _print_assessment_summary_pass(
     vulnerabilities_found: int,
     verification_result: str,
     human_interventions: int,
-    exec_mode: str
+    exec_mode: str,
+    pre_assessments: int = 0,
+    post_mem: dict | None = None
 ) -> None:
     # 1. Final Assessment Card
     card_content = (
@@ -1095,6 +1151,23 @@ def _print_assessment_summary_pass(
     )
     console.print(Panel(card_content, border_style="cyan", expand=False))
     console.print()
+
+    # End-of-Run Learning Summary
+    if post_mem is not None:
+        if pre_assessments == 0:
+            summary_text = "[bold white]Repository Learning Created[/bold white]"
+        else:
+            summary_text = (
+                "[bold white]Repository Learning Updated[/bold white]\n\n"
+                "[bold]Assessments:[/bold]\n"
+                f"{pre_assessments} → {post_mem['total_assessments']}\n\n"
+                "[bold]Last Score:[/bold]\n"
+                f"{post_mem['last_score']}\n\n"
+                "[bold]Known Vulnerabilities:[/bold]\n"
+                f"{sum(post_mem['vulnerabilities_seen'].values())}"
+            )
+        console.print(Panel(summary_text, border_style="green", expand=False))
+        console.print()
 
     # 2. Timeline
     console.print("[bold white]Timeline[/bold white]\n")

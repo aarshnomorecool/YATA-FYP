@@ -366,6 +366,67 @@ class ReportGenerator:
         </table>
         """
 
+        # 10. Repository History Section
+        from learner_agent import LearnerAgent
+        mem = LearnerAgent().load_memory(report.repository_name)
+
+        history_html = ""
+        if not mem or not mem.get("assessment_history"):
+            history_html = "<p>No prior assessment history available.</p>"
+        else:
+            history = mem.get("assessment_history", [])
+            freq_items = "".join(f"<li>{self._escape_html(k)}: {v}</li>" for k, v in mem.get("vulnerabilities_seen", {}).items())
+
+            timeline_items = ""
+            for idx, entry in enumerate(history, 1):
+                timeline_items += f"<li>Assessment #{idx} ({self._escape_html(entry.get('date', ''))}): Score {entry.get('score_before', 0)} &rarr; {entry.get('score_after', 0)} ({entry.get('findings', 0)} findings)</li>"
+
+            table_rows = ""
+            for idx, entry in enumerate(history, 1):
+                table_rows += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td>{self._escape_html(entry.get('date', ''))}</td>
+                    <td>{entry.get('score_before', 0)}</td>
+                    <td>{entry.get('score_after', 0)}</td>
+                    <td>{entry.get('findings', 0)}</td>
+                </tr>
+                """
+
+            history_html += f"""
+            <table class="table-info">
+                <tr><th>Previous Assessments</th><td>{mem.get('total_assessments', 0)}</td></tr>
+                <tr><th>Last Score</th><td>{mem.get('last_score', 0)}/100</td></tr>
+                <tr><th>Best Score</th><td>{mem.get('best_score', 0)}/100</td></tr>
+            </table>
+
+            <h3>Vulnerability Frequency</h3>
+            <ul>
+                {freq_items if freq_items else "<li>None recorded</li>"}
+            </ul>
+
+            <h3>Historical Assessment Timeline</h3>
+            <ul>
+                {timeline_items if timeline_items else "<li>None recorded</li>"}
+            </ul>
+
+            <h3>Assessment History Table</h3>
+            <table class="table-info">
+                <thead>
+                    <tr>
+                        <th>Assessment #</th>
+                        <th>Date</th>
+                        <th>Before</th>
+                        <th>After</th>
+                        <th>Findings</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {table_rows}
+                </tbody>
+            </table>
+            """
+
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -522,6 +583,11 @@ class ReportGenerator:
             <section class="card" id="metrics">
                 <h2>Metrics</h2>
                 {metrics_html}
+            </section>
+
+            <section class="card" id="repository-history">
+                <h2>Repository History</h2>
+                {history_html}
             </section>
         </main>
     </div>
