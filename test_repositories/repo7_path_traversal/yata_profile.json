@@ -1,0 +1,10 @@
+{
+  "path_traversal": {
+    "path": "/download",
+    "method": "GET",
+    "params": {
+      "file": "__PAYLOAD__"
+    },
+    "expected_status": 200
+  }
+}

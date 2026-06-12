@@ -34,10 +34,10 @@ VULNERABILITY_MAPPING = {
         "severity": "CRITICAL",
     },
     "Path Traversal": {
-        "owasp": "A05:2021 – Security Misconfiguration",
+        "owasp": "A01:2021 Broken Access Control",
         "cwe": "CWE-22",
-        "impact": "Arbitrary file read, Information disclosure",
-        "severity": "MEDIUM",
+        "impact": "Unauthorized File Access, Source Code Disclosure, Configuration Exposure, Sensitive Data Leakage",
+        "severity": "HIGH",
     }
 }
 

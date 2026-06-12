@@ -28,6 +28,14 @@ class AttackLibrary:
                 "&& hostname",
                 "; echo YATA_SUCCESS",
                 "&& echo YATA_SUCCESS"
+            ],
+            "Path Traversal": [
+                "../secret_admin.txt",
+                "..\\secret_admin.txt",
+                "../../secret_admin.txt",
+                "..\\..\\secret_admin.txt",
+                "../../../secret_admin.txt",
+                "..\\..\\..\\secret_admin.txt"
             ]
         }
 

@@ -7,7 +7,7 @@ from red_agent import VulnerabilityFinding
 
 
 def generate_patch(target_root: Path, finding: VulnerabilityFinding):
-    from blue_agent import SQLInjectionPatchStrategy, HardcodedSecretPatchStrategy, CommandInjectionPatchStrategy, PatchResult
+    from blue_agent import SQLInjectionPatchStrategy, HardcodedSecretPatchStrategy, CommandInjectionPatchStrategy, PathTraversalPatchStrategy, PatchResult
 
     target_root = target_root.resolve()
     temp_root = Path(tempfile.mkdtemp(prefix="yata_patched_"))
@@ -24,6 +24,8 @@ def generate_patch(target_root: Path, finding: VulnerabilityFinding):
         strategy = HardcodedSecretPatchStrategy()
     elif finding.vulnerability_type == "Command Injection":
         strategy = CommandInjectionPatchStrategy()
+    elif finding.vulnerability_type == "Path Traversal":
+        strategy = PathTraversalPatchStrategy()
     else:
         raise ValueError(f"No patch strategy registered for {finding.vulnerability_type}")
 

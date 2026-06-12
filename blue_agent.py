@@ -291,6 +291,142 @@ class CommandInjectionPatchStrategy(PatchStrategy):
         return line[: len(line) - len(line.lstrip())]
 
 
+class PathTraversalPatchStrategy(PatchStrategy):
+    vulnerability_type = "Path Traversal"
+
+    def apply_source(self, source: str, finding: VulnerabilityFinding) -> str:
+        metadata = finding.metadata
+        execute_line = int(metadata.get("execute_line", finding.line_number))
+        end_execute_line = int(metadata.get("end_execute_line", execute_line))
+        func_name = str(metadata.get("func_name", "open"))
+        call_src = str(metadata.get("call_src", ""))
+        first_arg_src = str(metadata.get("first_arg_src", ""))
+
+        lines = source.splitlines()
+        indent = self._line_indent(lines, execute_line)
+
+        # Parse base and filename from first_arg_src
+        base_src, filename_src = self._parse_path_expression(first_arg_src)
+
+        # Build sanitization code block
+        sanitization_block = [
+            f"{indent}from pathlib import Path",
+            f"{indent}base = Path({base_src}).resolve()",
+            f"{indent}target = (base / {filename_src}).resolve()",
+            f"{indent}if not str(target).startswith(str(base)):",
+            f"{indent}    from flask import abort",
+            f"{indent}    abort(403)",
+        ]
+
+        if first_arg_src:
+            new_call_src = call_src.replace(first_arg_src, "target", 1)
+        else:
+            new_call_src = call_src
+
+        segment = "\n".join(lines[execute_line - 1 : end_execute_line])
+        if call_src in segment:
+            new_segment = segment.replace(call_src, new_call_src, 1)
+        else:
+            new_segment = segment
+
+        lines_replacement = sanitization_block + new_segment.splitlines()
+        lines[execute_line - 1 : end_execute_line] = lines_replacement
+
+        patched = "\n".join(lines)
+        if source.endswith("\n"):
+            patched += "\n"
+
+        return self._ensure_imports(patched)
+
+    def _parse_path_expression(self, expr_src: str) -> tuple[str, str]:
+        if not expr_src:
+            return '"."', '""'
+        try:
+            tree = ast.parse(expr_src.strip())
+            if not tree.body or not isinstance(tree.body[0], ast.Expr):
+                return '"."', expr_src
+            expr = tree.body[0].value
+            if isinstance(expr, ast.Call):
+                func_name = self._get_func_name(expr.func)
+                if func_name in ("os.path.join", "join", "safe_join") and len(expr.args) >= 2:
+                    base_src = ast.get_source_segment(expr_src, expr.args[0])
+                    filename_parts = [ast.get_source_segment(expr_src, arg) for arg in expr.args[1:]]
+                    filename_src = " / ".join(filename_parts)
+                    return base_src, filename_src
+            if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+                left_src = ast.get_source_segment(expr_src, expr.left)
+                right_src = ast.get_source_segment(expr_src, expr.right)
+                return left_src, right_src
+        except Exception:
+            pass
+        return '"."', expr_src
+
+    def _get_func_name(self, node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            val_name = self._get_func_name(node.value)
+            if val_name:
+                return f"{val_name}.{node.attr}"
+            return node.attr
+        return None
+
+    def _line_indent(self, lines: list[str], line_number: int) -> str:
+        if not (0 <= line_number - 1 < len(lines)):
+            return ""
+        line = lines[line_number - 1]
+        return line[: len(line) - len(line.lstrip())]
+
+    def _ensure_imports(self, source: str) -> str:
+        patched = source
+        if "from pathlib import Path" not in patched and "import pathlib" not in patched:
+            patched = self._insert_import(patched, "from pathlib import Path")
+        if "from flask import abort" not in patched and "import flask" not in patched:
+            patched = self._insert_import(patched, "from flask import abort")
+        return patched
+
+    def _insert_import(self, source: str, import_stmt: str) -> str:
+        lines = source.splitlines()
+        insert_at = 0
+        try:
+            tree = ast.parse(source)
+            for node in tree.body:
+                if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                    insert_at = max(insert_at, getattr(node, "end_lineno", node.lineno))
+                    continue
+                if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                    insert_at = max(insert_at, getattr(node, "end_lineno", node.lineno))
+                    continue
+                break
+        except Exception:
+            insert_at = 0
+
+        lines.insert(insert_at, import_stmt)
+        patched = "\n".join(lines)
+        if source.endswith("\n"):
+            patched += "\n"
+        return patched
+
+    def is_safe(self, source: str, finding: VulnerabilityFinding) -> bool:
+        normalized = source.replace("\t", "    ")
+        has_path = "Path(" in normalized
+        has_resolve = ".resolve()" in normalized
+        has_startswith = "startswith(" in normalized
+        has_abort = "abort(" in normalized or "raise " in normalized
+        return has_path and has_resolve and has_startswith and has_abort
+
+    def build_summary(self, original: str, patched: str) -> str:
+        if original == patched:
+            return "No changes were required; the path resolution already appeared safe."
+        return "Resolved path dynamically and validated that it starts with the restricted base directory."
+
+    def fallback_guidance(self) -> tuple[str, str]:
+        return (
+            "Mitigation: Resolve and normalize the file path using pathlib.Path, then check if the target starts with the base uploads directory prefix.",
+            "Defense Strategy: Standardize on resolving relative paths and checking startswith boundary validation before opening any filesystem resources.",
+        )
+
+
 class BlueAgent:
     def __init__(
         self,
@@ -303,6 +439,7 @@ class BlueAgent:
             SQLInjectionPatchStrategy.vulnerability_type: SQLInjectionPatchStrategy(),
             HardcodedSecretPatchStrategy.vulnerability_type: HardcodedSecretPatchStrategy(),
             CommandInjectionPatchStrategy.vulnerability_type: CommandInjectionPatchStrategy(),
+            PathTraversalPatchStrategy.vulnerability_type: PathTraversalPatchStrategy(),
         }
         self.verbose = False
 
@@ -389,7 +526,7 @@ class BlueAgent:
             "Hardcoded Secrets": "implemented",
             "Cross-Site Scripting": "framework-ready, patch strategy pending",
             "Command Injection": "implemented",
-            "Path Traversal": "framework-ready, patch strategy pending",
+            "Path Traversal": "implemented",
         }
 
     def _build_patch_prompt(self, source: str, finding: VulnerabilityFinding) -> str:

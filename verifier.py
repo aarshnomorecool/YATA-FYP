@@ -78,8 +78,49 @@ class Referee:
             "Hardcoded Secrets": "implemented",
             "Cross-Site Scripting": "framework-ready, verification strategy pending",
             "Command Injection": "implemented",
-            "Path Traversal": "framework-ready, verification strategy pending",
+            "Path Traversal": "implemented",
         }
+
+    def _verify_path_traversal(self, app_root: Path, finding: VulnerabilityFinding, payload: str) -> VerificationResult:
+        import os
+        old_cwd = os.getcwd()
+        os.chdir(app_root)
+        try:
+            app_module = self._load_app_module(app_root / "app.py")
+            app = app_module.create_app(str(app_root / "database.db"))
+            profile = self._load_profile(app_root).get("path_traversal", {})
+            method = str(profile.get("method", "GET")).upper()
+            path = str(profile.get("path", "/download"))
+            params = dict(profile.get("params", {"file": "__PAYLOAD__"}))
+            success_status_code = int(profile.get("expected_status", 200))
+
+            request_values = {
+                key: payload if value == "__PAYLOAD__" else value
+                for key, value in params.items()
+            }
+
+            with app.test_client() as client:
+                if method == "GET":
+                    response = client.get(path, query_string=request_values, follow_redirects=True)
+                else:
+                    response = client.post(path, data=request_values, follow_redirects=True)
+
+            body = response.get_data(as_text=True)
+            exploit_succeeded = "YATA_TRAVERSAL_SUCCESS" in body
+            attack_succeeded = exploit_succeeded and response.status_code == success_status_code
+            evidence = (
+                f"Runtime exploit reproduced against {path}; retrieved YATA_TRAVERSAL_SUCCESS."
+                if attack_succeeded
+                else "Runtime exploit blocked or failed to retrieve YATA_TRAVERSAL_SUCCESS."
+            )
+            return VerificationResult(
+                attack_succeeded=attack_succeeded,
+                status_code=response.status_code,
+                response_text=body,
+                evidence=evidence,
+            )
+        finally:
+            os.chdir(old_cwd)
 
     def _verify_sql_injection(self, app_root: Path, finding: VulnerabilityFinding, payload: str) -> VerificationResult:
         app_module = self._load_app_module(app_root / "app.py")
