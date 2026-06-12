@@ -415,3 +415,4 @@ Every patch must survive an attack from YATA's own offensive engine before it is
 ---
 
 Built by Team Seasaw.
+<img width="1119" height="627" alt="image" src="https://github.com/user-attachments/assets/915f5152-1ee8-4068-95ea-77d3b8da3bf3" />
