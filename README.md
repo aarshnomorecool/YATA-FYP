@@ -1,279 +1,286 @@
-# YATA — Yet Another Threat Antagonist
+# YATA
 
-> An autonomous cybersecurity agent that discovers vulnerabilities, proves exploitability, generates patches, attacks its own fixes, and learns from every assessment.
+### Yet Another Threat Antagonist
 
-```bash
-git clone aarshnomorecool/yata.git
-cd yata
+> The Cybersecurity Ouroboros
 
-python -m venv .venv
+An autonomous security agent that attacks a codebase, heals the vulnerabilities it proves, attacks its own remediations, and learns from every assessment.
 
-# Windows
-.venv\Scripts\activate
+Most security tools stop at detection.
 
-pip install -e .
+YATA refuses to trust detection alone.
 
-yata --demo
-```
+***A vulnerability is not accepted until YATA successfully exploits it.***
+
+A patch is not accepted until YATA fails to break it.
+
+**Attack. Heal. Attack Again. Learn.**
 
 ---
 
-## What is YATA?
+# Why YATA?
 
-YATA (Yet Another Threat Antagonist) is an autonomous security assessment and remediation platform.
-
-Unlike traditional scanners that stop at detection, YATA executes a complete offensive-to-defensive security workflow:
+Traditional security workflows are fragmented.
 
 ```text
-Discover Vulnerability
-        ↓
-Prove Exploitability
-        ↓
-Generate Patch
-        ↓
-Apply Patch
-        ↓
-Attack Patch
-        ↓
-Validate Security
-        ↓
-Learn & Remember
+Scanner
+   ↓
+Find Vulnerability
+   ↓
+Developer Investigates
+   ↓
+Developer Creates Patch
+   ↓
+Developer Tests Patch
+   ↓
+Developer Validates Security
 ```
 
-A vulnerability is not considered real until YATA proves it can exploit it.
+The remediation process remains largely manual.
 
-A patch is not considered secure until YATA fails to break it.
+
+
+
+YATA automates the complete offensive-to-defensive cycle.
+
+```text
+Repository
+    ↓
+HUNTER attacks
+    ↓
+Exploit succeeds
+    ↓
+HEALER repairs
+    ↓
+VALIDATOR attacks again
+    ↓
+Patch survives
+    ↓
+LEARNER remembers
+```
+
+
+
+
+Every remediation must survive an attack from YATA's own offensive engine before it is accepted.
 
 ---
 
-## Core Agents
+# Core Agents
 
-### HUNTER
+## HUNTER
 
 Offensive security agent.
 
 Responsibilities:
 
-- Discover vulnerabilities
-- Build attack paths
-- Execute payloads
-- Prove exploitability
+* Build attack paths
+* Execute payloads
+* Prove exploitability
+* Confirm vulnerabilities
 
 ---
 
-### HEALER
+## HEALER
 
 Defensive remediation agent.
 
 Responsibilities:
 
-- Generate secure patches
-- Apply minimal code changes
-- Preserve functionality
-- Produce validated fixes
+* Generate secure patches
+* Preserve functionality
+* Apply minimal changes
+* Produce validated fixes
 
 ---
 
-### VALIDATOR
+## VALIDATOR
 
 Adversarial validation agent.
 
 Responsibilities:
 
-- Re-run exploit chains
-- Attack generated patches
-- Verify exploit prevention
-- Confirm remediation success
+* Re-run exploit chains
+* Attack generated patches
+* Verify exploit prevention
+* Confirm remediation success
 
 ---
 
-### LEARNER
+## LEARNER
 
 Repository memory agent.
 
 Responsibilities:
 
-- Track assessment history
-- Record vulnerability trends
-- Track patch success rates
-- Maintain repository knowledge
-
-Repository memory is stored locally:
-
-```text
-.yata/memory/
-```
+* Track assessment history
+* Record vulnerability trends
+* Track patch success rates
+* Maintain repository knowledge
 
 ---
 
-## Assessment Workflow
+# Supported Vulnerabilities
 
-```text
-HUNTER
-  ↓
-HEALER
-  ↓
-VALIDATOR
-  ↓
-LEARNER
-```
-
-Security Score:
-
-```text
-Before Assessment
-      ↓
-Vulnerabilities Found
-      ↓
-Patches Generated
-      ↓
-Validation Passed
-      ↓
-Score Updated
-```
+| Vulnerability             | Exploit | Patch | Validate |
+| ------------------------- | ------- | ----- | -------- |
+| SQL Injection             | ✓       | ✓     | ✓        |
+| Hardcoded Secret Exposure | ✓       | ✓     | ✓        |
+| Command Injection         | ✓       | ✓     | ✓        |
+| Path Traversal            | ✓       | ✓     | ✓        |
 
 ---
 
-## Supported Vulnerabilities
+# Quick Start
 
-| Vulnerability             | Detect | Exploit | Patch | Validate |
-| ------------------------- | ------ | ------- | ----- | -------- |
-| SQL Injection             | ✓      | ✓       | ✓     | ✓        |
-| Hardcoded Secret Exposure | ✓      | ✓       | ✓     | ✓        |
-| Command Injection         | ✓      | ✓       | ✓     | ✓        |
-| Path Traversal            | ✓      | ✓       | ✓     | ✓        |
-
----
-
-## Execution Modes
-
-### SAFE
+## Clone Repository
 
 ```bash
-yata assess <repository> --safe
+git clone https://github.com/aarshnomorecool/yata.git
+cd yata
 ```
 
-- Creates patched copies
-- Original files untouched
-- Recommended mode
+## Create Virtual Environment
 
----
+### Windows PowerShell
 
-### APPLY
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+### Linux / macOS
 
 ```bash
-yata assess <repository> --apply
+python -m venv .venv
+source .venv/bin/activate
 ```
 
-- Applies validated patches directly
-- Updates repository files
-
----
-
-### INTERACTIVE
+## Install YATA
 
 ```bash
-yata assess <repository> --interactive
+pip install -e .
 ```
 
-- Requests approval before patching
-- Human-in-the-loop workflow
-
----
-
-## Native CLI Commands
-
-### Assess Repository
-
-```bash
-yata assess <repository> --safe
-```
-
----
-
-### Discover Repositories
-
-```bash
-yata discover <path>
-```
-
----
-
-### Repository Memory
-
-```bash
-yata memory <repository>
-```
-
----
-
-### Assessment History
-
-```bash
-yata history <repository>
-```
-
----
-
-### Latest Report
-
-```bash
-yata report <repository>
-```
-
----
-
-### Platform Status
-
-```bash
-yata status
-```
-
----
-
-### Version
+## Verify Installation
 
 ```bash
 yata version
 ```
 
+Expected:
+
+```text
+YATA v0.8.1
+```
+
 ---
 
-### Help
+# First Assessment
+
+Run the demo:
+
+```bash
+yata --demo
+```
+
+Run against a repository:
+
+```bash
+yata assess test_repositories/repo5_mixed --safe
+```
+
+---
+
+# Execution Modes
+
+## SAFE
+
+```bash
+yata assess <repository> --safe
+```
+
+Creates validated patches without modifying original files.
+
+Recommended mode.
+
+---
+
+## APPLY
+
+```bash
+yata assess <repository> --apply
+```
+
+Automatically applies validated remediations directly to the target repository.
+
+---
+
+## INTERACTIVE
+
+```bash
+yata assess <repository> --interactive
+```
+
+Requests user approval before patch application.
+
+---
+
+# Native CLI Commands
 
 ```bash
 yata help
 ```
 
----
-
-## Repository Discovery
-
-YATA can automatically discover repositories within a workspace.
-
-Example:
+Show available commands.
 
 ```bash
-yata discover test_repositories
+yata assess <repository> --safe
 ```
 
-Output:
+Assess repository.
 
-```text
-repo1_login_sqli
-repo2_search_sqli
-repo3_admin_sqli
-repo4_hardcoded_secret
-repo5_mixed
-repo6_command_injection
-repo7_path_traversal
+```bash
+yata discover <path>
 ```
+
+Discover repositories.
+
+```bash
+yata memory <repository>
+```
+
+View repository memory.
+
+```bash
+yata history <repository>
+```
+
+View assessment history.
+
+```bash
+yata report <repository>
+```
+
+Open latest report.
+
+```bash
+yata status
+```
+
+View platform statistics.
+
+```bash
+yata version
+```
+
+Display version information.
 
 ---
 
-## Repository Memory
+# Repository Memory
 
-Each repository develops a persistent security history.
+Every repository develops persistent security knowledge.
 
 Stored under:
 
@@ -281,19 +288,21 @@ Stored under:
 .yata/memory/<repository>/memory.json
 ```
 
-Tracked metrics:
+Tracked information:
 
-- Total Assessments
-- Best Security Score
-- Last Security Score
-- Vulnerabilities Seen
-- Successful Patches
-- Failed Patches
-- Assessment Timeline
+* Assessment history
+* Security scores
+* Vulnerability trends
+* Patch success rates
+* Repository statistics
+
+YATA does not simply assess repositories.
+
+It remembers them.
 
 ---
 
-## Reports
+# Reports
 
 YATA generates:
 
@@ -305,38 +314,17 @@ Rich CLI summaries.
 
 Containing:
 
-- Executive Summary
-- Security Score Evolution
-- Vulnerabilities Found
-- Exploits Proven
-- Patches Applied
-- Validation Results
-- Timeline
-- Agent Status
-- Metrics
-- Repository History
+* Executive Summary
+* Security Score Evolution
+* Proven Exploits
+* Generated Patches
+* Validation Results
+* Repository History
+* Agent Metrics
 
 ---
 
-## Demo Mode
-
-No API key required.
-
-```bash
-yata --demo
-```
-
-Demonstrates:
-
-- SQL Injection
-- Hardcoded Secret Exposure
-- Autonomous Patch Generation
-- Validation Loop
-- Repository Memory
-
----
-
-## NVIDIA Assisted Mode
+# NVIDIA Assisted Mode
 
 Default model:
 
@@ -358,7 +346,7 @@ NVIDIA_API_KEY=<your-key>
 
 ---
 
-## Autonomous Fallback Mode
+# Autonomous Fallback Mode
 
 If no API key is available:
 
@@ -372,33 +360,32 @@ No functionality is lost.
 
 ---
 
-## Current Roadmap
+# Roadmap
 
 ### Completed
 
-- ✓ SQL Injection
-- ✓ Hardcoded Secret Detection
-- ✓ Command Injection
-- ✓ Path Traversal
-- ✓ Adversarial Validation
-- ✓ Repository Memory
-- ✓ Git-Style Commands
-- ✓ Native CLI Installation
-- ✓ HTML Reporting
-- ✓ Multi-Repository Assessment
+* SQL Injection
+* Hardcoded Secret Exposure
+* Command Injection
+* Path Traversal
+* Adversarial Validation
+* Repository Memory
+* Native CLI Installation
+* HTML Reporting
+* Multi Repository Assessment
 
 ### Planned
 
-- Repository Discovery v2
-- Assess-All Workspaces
-- Cross-Site Scripting (XSS)
-- SSRF
-- Watch Mode
-- GitHub Pull Request Automation
+* Cross Site Scripting (XSS)
+* SSRF
+* Repository Discovery v2
+* GitHub Pull Request Automation
+* CI/CD Integration
+* Watch Mode
 
 ---
 
-## FAR AWAY 2026
+# FAR AWAY 2026
 
 Submitted under:
 
@@ -410,9 +397,10 @@ YATA's core principle:
 
 > A security agent is only as trustworthy as its ability to defeat itself.
 
-Every patch must survive an attack from YATA's own offensive engine before it is accepted.
+Inspired by the Ouroboros, YATA attacks repositories, heals proven weaknesses, attacks its own remediations, and learns from every assessment.
+
+**Attack. Heal. Attack Again. Learn.**
 
 ---
 
 Built by Team Seasaw.
-<img width="1119" height="627" alt="image" src="https://github.com/user-attachments/assets/915f5152-1ee8-4068-95ea-77d3b8da3bf3" />
