@@ -31,50 +31,6 @@ class LLMResponse:
     error: str | None = None
 
 
-class LLMClient:
-    DEFAULT_MODEL = "qwen/qwen3-next-80b-a3b-instruct"
-    MODEL_FALLBACKS = {
-        "qwen/qwen2.5-coder-32b-instruct": DEFAULT_MODEL,
-        "qwen/qwen3-coder-480b-a35b-instruct": DEFAULT_MODEL,
-    }
-    execution_mode = "nvidia_assisted"
-    fallback_message_printed = False
-
-    def __init__(
-        self,
-        *,
-        env_path: Path | None = None,
-        model: str | None = None,
-        base_url: str | None = None,
-        timeout: int = 90,
-    ) -> None:
-        env_values = self._load_env_file(env_path or Path(__file__).resolve().parent / ".env")
-
-        self.model = (
-            os.getenv("YATA_LLM_MODEL")
-            or env_values.get("YATA_LLM_MODEL")
-            or model
-            or self.DEFAULT_MODEL
-        )
-        raw_base_url = (
-            os.getenv("NVIDIA_API_BASE_URL")
-            or env_values.get("NVIDIA_API_BASE_URL")
-            or base_url
-            or "https://integrate.api.nvidia.com/v1"
-        )
-        self.base_url = self._normalize_base_url(raw_base_url)
-        self.api_key = (
-            os.getenv("NVIDIA_API_KEY")
-            or env_values.get("NVIDIA_API_KEY")
-            or os.getenv("NGC_API_KEY")
-            or env_values.get("NGC_API_KEY")
-        )
-        if not self.api_key and LLMClient.execution_mode != "demo":
-            LLMClient.execution_mode = "autonomous_fallback"
-        self.timeout = timeout
-        self.llm_requests = 0
-        self.llm_time = 0.0
-
 def _update_status_progressively(stop_event: threading.Event, live: Live, prefix: str):
     start = time.time()
     last_phase = 0
@@ -124,7 +80,7 @@ def _update_status_progressively(stop_event: threading.Event, live: Live, prefix
 
 
 class LLMClient:
-    DEFAULT_MODEL = "qwen/qwen3-next-80b-a3b-instruct"
+    DEFAULT_MODEL = "qwen/qwen3.5-122b-a10b"
     MODEL_FALLBACKS = {
         "qwen/qwen2.5-coder-32b-instruct": DEFAULT_MODEL,
         "qwen/qwen3-coder-480b-a35b-instruct": DEFAULT_MODEL,
@@ -167,6 +123,10 @@ class LLMClient:
         self.llm_requests = 0
         self.llm_time = 0.0
 
+    @property
+    def average_request_time(self) -> float:
+        return self.llm_time / self.llm_requests if self.llm_requests > 0 else 0.0
+
     def generate(
         self,
         *,
@@ -179,7 +139,7 @@ class LLMClient:
         request_type: str | None = None,
     ) -> LLMResponse:
         import time
-        start_time = time.time()
+        request_start_time = time.time()
         self.llm_requests += 1
 
         if not self.api_key:
@@ -223,7 +183,7 @@ class LLMClient:
                 thread.start()
 
             try:
-                return self._invoke_model(
+                response = self._invoke_model(
                     model_name=self.model,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
@@ -236,7 +196,7 @@ class LLMClient:
                 error_message = self._format_exception(exc)
                 if replacement_model and self._looks_end_of_life_error(error_message):
                     try:
-                        return self._invoke_model(
+                        response = self._invoke_model(
                             model_name=replacement_model,
                             system_prompt=system_prompt,
                             user_prompt=user_prompt,
@@ -249,8 +209,16 @@ class LLMClient:
                         combined_error = (
                             f"{error_message} | Replacement model {replacement_model} also failed: {replacement_error}"
                         )
-                        return self._fallback(combined_error, fallback_text)
-                return self._fallback(error_message, fallback_text)
+                        response = self._fallback(combined_error, fallback_text)
+                else:
+                    response = self._fallback(error_message, fallback_text)
+
+            if request_type == "healer" and response.success and "```" in response.content:
+                idx = response.content.find("```")
+                if idx > 0:
+                    response.content = response.content[idx:]
+
+            return response
         finally:
             if stop_event is not None:
                 stop_event.set()
@@ -261,7 +229,9 @@ class LLMClient:
                     pass
             if thread is not None:
                 thread.join(timeout=1.0)
-            self.llm_time += time.time() - start_time
+            request_end_time = time.time()
+            llm_duration = request_end_time - request_start_time
+            self.llm_time += llm_duration
 
     def _fallback(self, error: str, fallback_text: str) -> LLMResponse:
         if LLMClient.execution_mode == "nvidia_assisted":

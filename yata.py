@@ -971,7 +971,10 @@ def _run_repository(
                 human_interventions=human_interventions,
                 exec_mode=exec_mode_str,
                 pre_assessments=pre_assessments,
-                post_mem=post_mem
+                post_mem=post_mem,
+                llm_requests=llm_requests,
+                llm_time=llm_time,
+                avg_llm_response=avg_llm_response
             )
 
         if verbose:
@@ -1176,7 +1179,10 @@ def _print_assessment_summary_pass(
     human_interventions: int,
     exec_mode: str,
     pre_assessments: int = 0,
-    post_mem: dict | None = None
+    post_mem: dict | None = None,
+    llm_requests: int = 0,
+    llm_time: float = 0.0,
+    avg_llm_response: float = 0.0,
 ) -> None:
     # 1. Final Assessment Card
     card_content = (
@@ -1227,6 +1233,9 @@ def _print_assessment_summary_pass(
     console.print(f"Before   {make_score_bar(initial_score)} {initial_score:>3}\n")
     console.print(f"After    {make_score_bar(final_score)} {final_score:>3}\n")
     console.print(f"Improvement: {final_score - initial_score:+d}\n")
+    console.print(f"LLM Requests: {llm_requests}")
+    console.print(f"LLM Time: {llm_time:.1f} seconds")
+    console.print(f"Average Request: {avg_llm_response:.2f} seconds\n")
 
 
 def _print_suite_summary(summaries: list[RepositoryRunSummary]) -> None:
