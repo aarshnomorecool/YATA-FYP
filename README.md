@@ -329,7 +329,7 @@ Containing:
 Default model:
 
 ```text
-qwen/qwen3-next-80b-a3b-instruct
+qwen/qwen3.5-122b-a10b
 ```
 
 Configure:
