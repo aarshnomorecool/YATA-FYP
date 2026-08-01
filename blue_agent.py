@@ -471,7 +471,7 @@ class BlueAgent:
 
         patch_llm_response = self.llm.generate(
             system_prompt=(
-                "You are the BLUE agent in YATA. Patch the provided file without changing unrelated behavior. "
+                "You are HEALER in YATA. Patch the provided file without changing unrelated behavior. "
                 "Return only the full patched file contents."
             ),
             user_prompt=self._build_patch_prompt(original_source, finding),
@@ -490,7 +490,7 @@ class BlueAgent:
 
         mitigation_response = self.llm.generate(
             system_prompt=(
-                "You are the BLUE agent in YATA. Explain how a patch reduces exploitability and how defenders "
+                "You are HEALER in YATA. Explain how a patch reduces exploitability and how defenders "
                 "should harden the affected workflow."
             ),
             user_prompt=(

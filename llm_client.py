@@ -15,6 +15,12 @@ from rich.table import Table
 console = Console()
 
 try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:  # pragma: no cover - optional dependency, env vars may be set externally
+    pass
+
+try:
     from openai import APIStatusError, OpenAI
 except ImportError:  # pragma: no cover - handled via runtime fallback
     APIStatusError = None
@@ -95,12 +101,18 @@ class LLMClient:
         model: str | None = None,
         base_url: str | None = None,
         timeout: int = 90,
+        provider: str = "yata",
     ) -> None:
+        self.provider = provider
         env_values = self._load_env_file(env_path or Path(__file__).resolve().parent / ".env")
 
+        # RECON gets its own optional model override so it can run a different
+        # NVIDIA NIM model than YATA-Dev -- same account/key either way, this
+        # only changes which env var supplies the model name.
+        model_env_var = "YATA_RECON_LLM_MODEL" if provider == "recon" else "YATA_LLM_MODEL"
         self.model = (
-            os.getenv("YATA_LLM_MODEL")
-            or env_values.get("YATA_LLM_MODEL")
+            os.getenv(model_env_var)
+            or env_values.get(model_env_var)
             or model
             or self.DEFAULT_MODEL
         )

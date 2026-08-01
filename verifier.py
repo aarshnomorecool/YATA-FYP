@@ -41,7 +41,8 @@ class Referee:
         self.scorecard: list[RoundScore] = []
 
     def verify_exploit(self, app_root: Path, finding: VulnerabilityFinding, payload: str) -> VerificationResult:
-        verifier = getattr(self, f"_verify_{finding.vulnerability_type.lower().replace(' ', '_')}", None)
+        slug = re.sub(r"[^a-z0-9]+", "_", finding.vulnerability_type.lower())
+        verifier = getattr(self, f"_verify_{slug}", None)
         if verifier is None:
             raise ValueError(f"No validator strategy registered for {finding.vulnerability_type}")
         return verifier(app_root.resolve(), finding, payload)

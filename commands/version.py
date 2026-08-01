@@ -8,6 +8,7 @@ def run(args) -> int:
         "HUNTER     [bold green]✓[/bold green]\n"
         "HEALER     [bold green]✓[/bold green]\n"
         "VALIDATOR  [bold green]✓[/bold green]\n"
+        "MUTATOR    [bold green]✓[/bold green]\n"
         "LEARNER    [bold green]✓[/bold green]\n\n"
         "[bold white]Supported Vulnerabilities[/bold white]\n\n"
         "[bold green]✓[/bold green] SQL Injection\n"

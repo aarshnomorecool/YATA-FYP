@@ -16,6 +16,7 @@ from rich.table import Table
 from rich.align import Align
 
 from blue_agent import BlueAgent, PatchResult
+from mutator_agent import MutatorAgent
 from red_agent import AttackPlan, RedAgent, VulnerabilityFinding
 from report_generator import ReportGenerator
 from verifier import Referee, VerificationResult
@@ -126,7 +127,7 @@ class RepositoryRunSummary:
     human_interventions: int
 
 
-def assess_entrypoint(args: argparse.Namespace) -> int:
+def assess_entrypoint(args: argparse.Namespace, repository_roots: list[Path] | None = None) -> int:
     start_time_all = time.time()
 
     banner = """
@@ -204,11 +205,14 @@ def assess_entrypoint(args: argparse.Namespace) -> int:
             console.print(f"[red]Target path does not exist:[/red] {target_path}")
             return 1
 
-    repository_roots = _resolve_repository_roots(target_path)
+    if repository_roots is None:
+        repository_roots = _resolve_repository_roots(target_path)
     red_agent = RedAgent()
     blue_agent = BlueAgent()
+    mutator_agent = MutatorAgent()
     red_agent.verbose = args.verbose
     blue_agent.verbose = args.verbose
+    mutator_agent.verbose = args.verbose
     report_generator = ReportGenerator(Path(__file__).resolve().parent / "reports")
     summaries: list[RepositoryRunSummary] = []
 
@@ -311,6 +315,7 @@ def assess_entrypoint(args: argparse.Namespace) -> int:
             max_rounds=args.max_rounds,
             red_agent=red_agent,
             blue_agent=blue_agent,
+            mutator_agent=mutator_agent,
             report_generator=report_generator,
             verbose=args.verbose,
             live=args.live,
@@ -351,6 +356,9 @@ def dispatch_command(args: argparse.Namespace) -> int:
     elif args.command == "discover":
         from commands import discover
         return discover.run(args)
+    elif args.command == "recon":
+        from commands import recon
+        return recon.run(args)
     elif args.command == "memory":
         from commands import memory
         return memory.run(args)
@@ -380,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     raw_args = list(sys.argv[1:] if argv is None else argv)
     
-    subcommands = {"assess", "scan", "discover", "memory", "history", "report", "status", "version", "help"}
+    subcommands = {"assess", "scan", "discover", "recon", "memory", "history", "report", "status", "version", "help"}
     
     if not raw_args:
         raw_args = ["assess"]
@@ -413,6 +421,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # 2. discover
     discover_parser = subparsers.add_parser("discover", help="Discover repositories in a directory path")
     discover_parser.add_argument("target", help="Directory path to scan recursively")
+
+    # 2b. recon
+    recon_parser = subparsers.add_parser("recon", help="Attack a live HTTP target (deployment-side RECON module)")
+    recon_parser.add_argument("target", nargs="?", default=None, help="Base URL, e.g. http://127.0.0.1:8765")
+    recon_parser.add_argument("--profile", type=str, default=None, help="Path to a yata_profile.json-style endpoint profile")
+    recon_parser.add_argument(
+        "--serve-local",
+        type=str,
+        default=None,
+        help="Dev/test only: start one of the test_repositories Flask apps locally and attack it",
+    )
+    recon_parser.add_argument("--port", type=int, default=8765)
 
     # 3. memory
     memory_parser = subparsers.add_parser("memory", help="Display memory statistics for a repository")
@@ -476,6 +496,7 @@ def _run_repository(
     max_rounds: int,
     red_agent: RedAgent,
     blue_agent: BlueAgent,
+    mutator_agent: MutatorAgent,
     report_generator: ReportGenerator,
     verbose: bool = False,
     live: bool = False,
@@ -497,6 +518,7 @@ def _run_repository(
     t_hunter_attack = 0.0
     t_healer_patch = 0.0
     t_validator_verification = 0.0
+    t_mutator_verification = 0.0
 
     if verbose:
         console.print(
@@ -698,6 +720,33 @@ def _run_repository(
         t_validator_verification += time.time() - start_verify
         patch_succeeded = not patched_check.attack_succeeded
 
+        mutation_attempts: list[dict] = []
+        if patch_succeeded:
+            start_mutate = time.time()
+            mutation_payloads = mutator_agent.generate_mutations(finding.vulnerability_type, attack_plan.payload)
+            if verbose and mutation_payloads:
+                console.print("[bold magenta][MUTATOR][/bold magenta] Re-attacking patch with mutated payloads...")
+            for mutated_payload in mutation_payloads:
+                mutation_check = referee.verify_exploit(patch_result.patched_root, finding, mutated_payload)
+                mutation_attempts.append({
+                    "payload": mutated_payload,
+                    "bypassed": mutation_check.attack_succeeded,
+                    "evidence": mutation_check.evidence,
+                })
+                if verbose:
+                    status = "[bold red]BYPASS ✗[/bold red]" if mutation_check.attack_succeeded else "[bold green]BLOCKED ✓[/bold green]"
+                    console.print(f" └─ Mutation {mutated_payload!r} -> {status}")
+                if mutation_check.attack_succeeded:
+                    patch_succeeded = False
+                    patched_check = mutation_check
+                    break
+            t_mutator_verification += time.time() - start_mutate
+            if verbose and mutation_attempts:
+                if patch_succeeded:
+                    console.print("[bold magenta][MUTATOR][/bold magenta] All mutated payloads blocked. Patch holds.\n")
+                else:
+                    console.print("[bold red][MUTATOR][/bold red] A mutated payload bypassed the patch.\n")
+
         if verbose:
             if LLMClient.execution_mode in ("autonomous_fallback", "demo"):
                 if patch_succeeded:
@@ -714,9 +763,19 @@ def _run_repository(
             if not multi_repo:
                 if patch_succeeded:
                     val_msg = "Secret Externalized" if finding.vulnerability_type == "Hardcoded Secret" else "Exploit Blocked"
-                    console.print(f"VALIDATOR   [bold green]✓[/bold green] {val_msg}\n")
+                    console.print(f"VALIDATOR   [bold green]✓[/bold green] {val_msg}")
                 else:
-                    console.print("VALIDATOR   [bold red]✗[/bold red] Exploit Succeeded\n")
+                    console.print("VALIDATOR   [bold red]✗[/bold red] Exploit Succeeded")
+
+                if mutation_attempts:
+                    blocked_count = sum(1 for attempt in mutation_attempts if not attempt["bypassed"])
+                    total_count = len(mutation_attempts)
+                    if patch_succeeded:
+                        console.print(f"MUTATOR     [bold green]✓[/bold green] Patch Holds ({blocked_count}/{total_count} Mutations Blocked)\n")
+                    else:
+                        console.print("MUTATOR     [bold red]✗[/bold red] Bypassed By Mutation\n")
+                else:
+                    console.print()
 
         if patch_succeeded:
             healed_count += 1
@@ -763,7 +822,10 @@ def _run_repository(
         else:
             remaining_findings = findings
             battle_status = "stalled"
-            termination_reason = "The patched copy still allowed the exploit."
+            if any(attempt["bypassed"] for attempt in mutation_attempts):
+                termination_reason = "The patch blocked the original payload but a mutated variant bypassed it."
+            else:
+                termination_reason = "The patched copy still allowed the exploit."
             if verbose and LLMClient.execution_mode not in ("autonomous_fallback", "demo"):
                 console.print(" └─ Exploit succeeded ✗")
                 console.print("[bold red][VALIDATOR][/bold red] Patch verification failed. Exploit bypass found.")
@@ -794,6 +856,7 @@ def _run_repository(
                 patch_succeeded=patch_succeeded,
                 round_score=round_score,
                 mode=mode,
+                mutation_attempts=mutation_attempts,
             )
         )
 
@@ -860,12 +923,14 @@ def _run_repository(
             "HUNTER": red_agent.capability_matrix(),
             "HEALER": blue_agent.capability_matrix(),
             "VALIDATOR": referee.capability_matrix(),
+            "MUTATOR": mutator_agent.capability_matrix(),
         },
         performance_telemetry={
             "hunter_discovery": t_hunter_discovery,
             "hunter_attack": t_hunter_attack,
             "healer_patch": t_healer_patch,
             "validator_verification": t_validator_verification,
+            "mutator_verification": t_mutator_verification,
             "llm_requests": int(llm_requests) if LLMClient.execution_mode not in ("autonomous_fallback", "demo") else 0,
             "llm_time": llm_time if LLMClient.execution_mode not in ("autonomous_fallback", "demo") else 0.0,
             "avg_llm_response": avg_llm_response if LLMClient.execution_mode not in ("autonomous_fallback", "demo") else 0.0,
@@ -1101,7 +1166,9 @@ def _build_round_report(
     patch_succeeded: bool,
     round_score,
     mode: str,
+    mutation_attempts: list[dict] | None = None,
 ) -> dict:
+    mutation_attempts = mutation_attempts or []
     return {
         "round_number": round_number,
         "finding": {
@@ -1148,6 +1215,11 @@ def _build_round_report(
                 "response_text": patched_check.response_text,
                 "evidence": patched_check.evidence,
             },
+        },
+        "mutation": {
+            "attempted": bool(mutation_attempts),
+            "attempts": mutation_attempts,
+            "bypassed": any(attempt["bypassed"] for attempt in mutation_attempts),
         },
     }
 

@@ -8,6 +8,12 @@ from pathlib import Path
 from attack_library import AttackLibrary
 from llm_client import LLMClient
 
+# Growable independently of what's wired into any RedAgent instance -- adding a
+# language here does nothing until a detector actually declares that language.
+LANGUAGE_EXTENSIONS: dict[str, set[str]] = {
+    "python": {".py"},
+}
+
 
 @dataclass(slots=True)
 class VulnerabilityFinding:
@@ -19,6 +25,7 @@ class VulnerabilityFinding:
     evidence: str
     detector_id: str
     metadata: dict[str, object] = field(default_factory=dict)
+    source: str = "yata"
 
 
 @dataclass(slots=True)
@@ -33,14 +40,25 @@ class AttackPlan:
 class VulnerabilityDetector:
     vulnerability_type = "Generic"
     detector_id = "generic.detector"
+    language = "python"
 
     def scan(self, source_file: Path) -> list[VulnerabilityFinding]:
         raise NotImplementedError
 
 
+def _build_extension_language_map(detectors: list[VulnerabilityDetector]) -> dict[str, str]:
+    languages = {detector.language for detector in detectors}
+    mapping: dict[str, str] = {}
+    for language in languages:
+        for extension in LANGUAGE_EXTENSIONS.get(language, set()):
+            mapping[extension] = language
+    return mapping
+
+
 class SQLInjectionDetector(VulnerabilityDetector):
     vulnerability_type = "SQL Injection"
     detector_id = "sqli.ast-string-interpolation"
+    language = "python"
 
     def scan(self, source_file: Path) -> list[VulnerabilityFinding]:
         try:
@@ -265,6 +283,7 @@ class SQLInjectionDetector(VulnerabilityDetector):
 class HardcodedSecretDetector(VulnerabilityDetector):
     vulnerability_type = "Hardcoded Secret"
     detector_id = "secret.literal-assignment"
+    language = "python"
 
     _NAME_PATTERN = re.compile(
         r"(secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|passwd|password)",
@@ -350,6 +369,7 @@ class HardcodedSecretDetector(VulnerabilityDetector):
 class CommandInjectionDetector(VulnerabilityDetector):
     vulnerability_type = "Command Injection"
     detector_id = "cmd_injection.ast-shell-execution"
+    language = "python"
 
     def scan(self, source_file: Path) -> list[VulnerabilityFinding]:
         try:
@@ -541,9 +561,87 @@ class CommandInjectionDetector(VulnerabilityDetector):
         return None
 
 
+def _build_parent_map(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    parent_map: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parent_map[child] = parent
+    return parent_map
+
+
+def _get_enclosing_function(node: ast.AST, parent_map: dict[ast.AST, ast.AST]) -> ast.FunctionDef | None:
+    curr = parent_map.get(node)
+    while curr is not None:
+        if isinstance(curr, ast.FunctionDef):
+            return curr
+        curr = parent_map.get(curr)
+    return None
+
+
+def _get_func_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        val_name = _get_func_name(node.value)
+        if val_name:
+            return f"{val_name}.{node.attr}"
+        return node.attr
+    return None
+
+
+def _is_request_derived(node: ast.AST, request_vars: set[str]) -> bool:
+    """Shared taint-tracking helper: does this expression carry data that
+    originated from a Flask `request` object? Used by any detector that needs
+    to know whether a value flowing into a sink (file open, outbound HTTP
+    call, HTML response, ...) is attacker-controlled.
+    """
+    if node is None:
+        return False
+    if isinstance(node, ast.Name):
+        return node.id in request_vars
+    if isinstance(node, ast.Attribute):
+        if isinstance(node.value, ast.Name) and node.value.id == "request":
+            return node.attr in ("args", "form", "values", "files", "json")
+        return _is_request_derived(node.value, request_vars)
+    if isinstance(node, ast.Subscript):
+        return _is_request_derived(node.value, request_vars)
+    if isinstance(node, ast.Call):
+        if _is_request_derived(node.func, request_vars):
+            return True
+        func_name = _get_func_name(node.func)
+        if func_name and any(func_name.startswith(r) for r in ("request.args.", "request.form.", "request.values.", "request.files.", "request.json.", "request.get_json")):
+            return True
+        if func_name == "request.get_json":
+            return True
+        if func_name in ("os.path.join", "join", "safe_join", "Path"):
+            return any(_is_request_derived(arg, request_vars) for arg in node.args)
+        return any(_is_request_derived(arg, request_vars) for arg in node.args)
+    if isinstance(node, ast.BinOp):
+        return _is_request_derived(node.left, request_vars) or _is_request_derived(node.right, request_vars)
+    if isinstance(node, ast.JoinedStr):
+        return any(_is_request_derived(val, request_vars) for val in node.values)
+    if isinstance(node, ast.FormattedValue):
+        return _is_request_derived(node.value, request_vars)
+    return False
+
+
+def _collect_request_vars(tree: ast.AST) -> set[str]:
+    request_vars: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = [node.target] if isinstance(node, ast.AnnAssign) else node.targets
+            value = node.value
+            if value is not None and _is_request_derived(value, request_vars):
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        request_vars.add(target.id)
+    return request_vars
+
+
 class PathTraversalDetector(VulnerabilityDetector):
     vulnerability_type = "Path Traversal"
     detector_id = "path_traversal.ast-taint-tracking"
+    language = "python"
 
     def scan(self, source_file: Path) -> list[VulnerabilityFinding]:
         try:
@@ -554,38 +652,15 @@ class PathTraversalDetector(VulnerabilityDetector):
 
         findings: list[VulnerabilityFinding] = []
         lines = source_text.splitlines()
-
-        # Track parent map to find enclosing functions
-        parent_map = {}
-        for parent in ast.walk(tree):
-            for child in ast.iter_child_nodes(parent):
-                parent_map[child] = parent
-
-        def get_enclosing_function(n):
-            curr = parent_map.get(n)
-            while curr is not None:
-                if isinstance(curr, ast.FunctionDef):
-                    return curr
-                curr = parent_map.get(curr)
-            return None
-
-        # Track request-derived variables using sequential assignments
-        request_vars = set()
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                targets = [node.target] if isinstance(node, ast.AnnAssign) else node.targets
-                value = node.value
-                if value is not None and self._is_request_derived(value, request_vars):
-                    for target in targets:
-                        if isinstance(target, ast.Name):
-                            request_vars.add(target.id)
+        parent_map = _build_parent_map(tree)
+        request_vars = _collect_request_vars(tree)
 
         # Scan for unsafe file operations
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
 
-            func_name = self._get_func_name(node.func)
+            func_name = _get_func_name(node.func)
             is_vuln_call = False
             first_arg = None
 
@@ -597,7 +672,7 @@ class PathTraversalDetector(VulnerabilityDetector):
                         if kw.arg in ("file", "path_or_file", "filename_or_fp"):
                             first_arg = kw.value
                             break
-                if first_arg is not None and self._is_request_derived(first_arg, request_vars):
+                if first_arg is not None and _is_request_derived(first_arg, request_vars):
                     is_vuln_call = True
 
             elif func_name in ("send_from_directory", "flask.send_from_directory"):
@@ -608,16 +683,16 @@ class PathTraversalDetector(VulnerabilityDetector):
                         if kw.arg == "path":
                             first_arg = kw.value
                             break
-                if first_arg is not None and self._is_request_derived(first_arg, request_vars):
+                if first_arg is not None and _is_request_derived(first_arg, request_vars):
                     is_vuln_call = True
 
             elif isinstance(node.func, ast.Attribute) and node.func.attr == "open":
-                if self._is_request_derived(node.func.value, request_vars):
+                if _is_request_derived(node.func.value, request_vars):
                     is_vuln_call = True
                     first_arg = node.func.value
 
             if is_vuln_call:
-                enclosing_func = get_enclosing_function(node)
+                enclosing_func = _get_enclosing_function(node, parent_map)
                 if enclosing_func is not None and self._is_function_safe_traversal(enclosing_func, source_text):
                     continue
 
@@ -660,46 +735,6 @@ class PathTraversalDetector(VulnerabilityDetector):
         normalized = func_src.replace("\t", "    ")
         return ".resolve()" in normalized and "startswith(" in normalized and ("abort(" in normalized or "raise " in normalized)
 
-    def _get_func_name(self, node: ast.AST) -> str | None:
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            val_name = self._get_func_name(node.value)
-            if val_name:
-                return f"{val_name}.{node.attr}"
-            return node.attr
-        return None
-
-    def _is_request_derived(self, node: ast.AST, request_vars: set[str]) -> bool:
-        if node is None:
-            return False
-        if isinstance(node, ast.Name):
-            return node.id in request_vars
-        if isinstance(node, ast.Attribute):
-            if isinstance(node.value, ast.Name) and node.value.id == "request":
-                return node.attr in ("args", "form", "values", "files", "json")
-            return self._is_request_derived(node.value, request_vars)
-        if isinstance(node, ast.Subscript):
-            return self._is_request_derived(node.value, request_vars)
-        if isinstance(node, ast.Call):
-            if self._is_request_derived(node.func, request_vars):
-                return True
-            func_name = self._get_func_name(node.func)
-            if func_name and any(func_name.startswith(r) for r in ("request.args.", "request.form.", "request.values.", "request.files.", "request.json.", "request.get_json")):
-                return True
-            if func_name == "request.get_json":
-                return True
-            if func_name in ("os.path.join", "join", "safe_join", "Path"):
-                return any(self._is_request_derived(arg, request_vars) for arg in node.args)
-            return any(self._is_request_derived(arg, request_vars) for arg in node.args)
-        if isinstance(node, ast.BinOp):
-            return self._is_request_derived(node.left, request_vars) or self._is_request_derived(node.right, request_vars)
-        if isinstance(node, ast.JoinedStr):
-            return any(self._is_request_derived(val, request_vars) for val in node.values)
-        if isinstance(node, ast.FormattedValue):
-            return self._is_request_derived(node.value, request_vars)
-        return False
-
 
 class RedAgent:
     def __init__(
@@ -710,16 +745,25 @@ class RedAgent:
     ) -> None:
         self.llm = llm_client or LLMClient()
         self.detectors = detectors or [SQLInjectionDetector(), HardcodedSecretDetector(), CommandInjectionDetector(), PathTraversalDetector()]
+        self._detectors_by_language: dict[str, list[VulnerabilityDetector]] = {}
+        for detector in self.detectors:
+            self._detectors_by_language.setdefault(detector.language, []).append(detector)
         self.attack_library = AttackLibrary()
         self.verbose = False
 
     def scan(self, target_root: Path) -> list[VulnerabilityFinding]:
         target_root = target_root.resolve()
         findings: list[VulnerabilityFinding] = []
-        for source_file in target_root.rglob("*.py"):
+        extension_to_language = _build_extension_language_map(self.detectors)
+        for source_file in target_root.rglob("*"):
+            if not source_file.is_file():
+                continue
             if any(part in (".yata", ".git", ".venv", "__pycache__") for part in source_file.parts):
                 continue
-            for detector in self.detectors:
+            language = extension_to_language.get(source_file.suffix.lower())
+            if language is None:
+                continue
+            for detector in self._detectors_by_language.get(language, []):
                 detector_findings = detector.scan(source_file)
                 for finding in detector_findings:
                     finding.metadata.setdefault("relative_file", str(source_file.relative_to(target_root)))
@@ -761,7 +805,7 @@ class RedAgent:
             )
         llm_response = self.llm.generate(
             system_prompt=(
-                "You are the RED agent in YATA. Explain a concrete software attack path using only the "
+                "You are HUNTER in YATA. Explain a concrete software attack path using only the "
                 "provided evidence. Do not invent extra vulnerabilities."
             ),
             user_prompt=(
@@ -774,6 +818,7 @@ class RedAgent:
                 "Write a concise explanation of how the exploit works and why it is risky."
             ),
             fallback_text=fallback_explanation,
+            temperature=0.9,
             max_tokens=220,
             request_type="hunter",
         )

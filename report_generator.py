@@ -624,7 +624,7 @@ class ReportGenerator:
             ])
         else:
             lines.extend([
-                "- Execution Mode: nvidia_assisted",
+                f"- Execution Mode: {report.execution_mode}",
             ])
         lines.extend([
             "",
