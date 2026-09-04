@@ -4,7 +4,7 @@ from rich.console import Console
 def run(args) -> int:
     console = Console()
     version_text = (
-        "[bold white]YATA v0.8.1[/bold white]\n\n"
+        "[bold white]YATA v0.9.0[/bold white]\n\n"
         "HUNTER     [bold green]✓[/bold green]\n"
         "HEALER     [bold green]✓[/bold green]\n"
         "VALIDATOR  [bold green]✓[/bold green]\n"

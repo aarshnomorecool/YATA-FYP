@@ -1,0 +1,150 @@
+/* YATA Terminal Mission Console Theme */
+
+Screen {
+    background: #0B0F14;
+    color: #E2E8F0;
+}
+
+/* Layout Containers */
+.main-container {
+    width: 100%;
+    height: 1fr;
+    padding: 1 2;
+}
+
+.panel-box {
+    background: #111827;
+    border: heavy #1E293B;
+    padding: 1;
+    margin-bottom: 1;
+}
+
+.panel-title {
+    color: #00D2FF;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.panel-subtitle {
+    color: #94A3B8;
+    margin-bottom: 1;
+}
+
+.banner-box {
+    text-align: center;
+    height: auto;
+    margin-bottom: 1;
+    color: #FF8800;
+}
+
+/* Option List Styling */
+OptionList {
+    background: #0F172A;
+    border: heavy #1E293B;
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+OptionList:focus {
+    border: heavy #00D2FF;
+}
+
+OptionList > .option-list--option-highlighted {
+    background: #1E293B;
+    color: #00FF9D;
+    text-style: bold;
+}
+
+/* Input Fields */
+Input {
+    background: #0F172A;
+    border: heavy #1E293B;
+    color: #E2E8F0;
+    margin-bottom: 1;
+}
+
+Input:focus {
+    border: heavy #00D2FF;
+}
+
+/* Buttons */
+Button {
+    background: #1E293B;
+    color: #E2E8F0;
+    border: none;
+    margin-right: 1;
+}
+
+Button:focus {
+    background: #00D2FF;
+    color: #0B0F14;
+    text-style: bold;
+}
+
+Button.primary {
+    background: #0284C7;
+    color: #FFFFFF;
+}
+
+Button.primary:focus {
+    background: #00FF9D;
+    color: #0B0F14;
+}
+
+Button.danger {
+    background: #BE123C;
+    color: #FFFFFF;
+}
+
+Button.danger:focus {
+    background: #FF3366;
+    color: #FFFFFF;
+}
+
+/* Execution Log Box */
+#log-container {
+    background: #070A0E;
+    border: solid #1E293B;
+    height: 10;
+    padding: 0 1;
+    margin-bottom: 1;
+    overflow-y: scroll;
+}
+
+.log-entry {
+    color: #94A3B8;
+    height: auto;
+}
+
+/* Split Columns */
+.split-horizontal {
+    layout: horizontal;
+    height: 1fr;
+    width: 100%;
+}
+
+.col-left {
+    width: 35%;
+    height: 100%;
+    margin-right: 1;
+}
+
+.col-right {
+    width: 65%;
+    height: 100%;
+}
+
+/* Human Review & Decision Modals */
+.decision-card {
+    background: #1A1016;
+    border: double #FF3366;
+    padding: 1 2;
+    margin-bottom: 1;
+}
+
+.decision-card-warning {
+    background: #1C1917;
+    border: double #F59E0B;
+    padding: 1 2;
+    margin-bottom: 1;
+}

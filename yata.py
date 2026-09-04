@@ -6,6 +6,17 @@ import shutil
 import sys
 import time
 import re
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -142,13 +153,13 @@ def assess_entrypoint(args: argparse.Namespace, repository_roots: list[Path] | N
     logo_block = "\n".join(banner_lines)
 
     splash_group = Group(
-        Align.center(f"[bold red]{logo_block}[/bold red]"),
+        Align.center(f"[bold #FF8800]{logo_block}[/bold #FF8800]"),
         Align.center(""),
         Align.center("[bold white]Yet Another Threat Antagonist[/bold white]"),
         Align.center("[dim]Autonomous Cyber Defense & Patching Agent[/dim]")
     )
     if not args.quiet:
-        console.print(Panel(splash_group, border_style="bold red", expand=True))
+        console.print(Panel(splash_group, border_style="bold #FF8800", expand=True))
 
     if args.max_rounds < 1:
         console.print("[red]--max-rounds must be at least 1[/red]")
@@ -381,14 +392,32 @@ def dispatch_command(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    if not raw_args:
+        from tui.app import run_tui
+        return run_tui()
+
     args = _parse_args(argv)
+
+    if args.command == "tui":
+        from tui.app import run_tui
+        target_path = Path(args.target).resolve() if getattr(args, "target", None) else None
+        return run_tui(initial_target=target_path)
+
+    if args.command in ("assess", "scan"):
+        if args.target is None and not getattr(args, "demo", False) and not (
+            getattr(args, "safe", False) or getattr(args, "apply", False) or getattr(args, "interactive", False)
+        ):
+            from tui.app import run_tui
+            return run_tui()
+
     return dispatch_command(args)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     raw_args = list(sys.argv[1:] if argv is None else argv)
     
-    subcommands = {"assess", "scan", "discover", "recon", "memory", "history", "report", "status", "version", "help"}
+    subcommands = {"assess", "scan", "discover", "recon", "memory", "history", "report", "status", "version", "help", "tui"}
     
     if not raw_args:
         raw_args = ["assess"]
@@ -455,6 +484,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # 8. help
     help_parser = subparsers.add_parser("help", help="Display YATA CLI help")
     help_parser.add_argument("subcommand", nargs="?", default=None, help="Optional subcommand to show help for")
+
+    # 9. tui
+    tui_parser = subparsers.add_parser("tui", help="Launch the interactive YATA Security Mission Console")
+    tui_parser.add_argument("target", nargs="?", default=None, help="Optional repository path to target directly")
 
     args = parser.parse_args(raw_args)
 

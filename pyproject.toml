@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yata"
-version = "0.8.1"
+version = "0.9.0"
 description = "YATA (Yet Another Threat Antagonist)"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -14,7 +14,8 @@ dependencies = [
     "requests>=2.31,<3.0",
     "openai>=2.41,<3.0",
     "InquirerPy>=0.3.4",
-    "python-dotenv>=1.0,<2.0"
+    "python-dotenv>=1.0,<2.0",
+    "textual>=8.2,<9.0"
 ]
 
 [project.scripts]
@@ -22,4 +23,4 @@ yata = "yata:main"
 
 [tool.setuptools]
 py-modules = ["yata", "blue_agent", "red_agent", "verifier", "report_generator", "llm_client", "llm", "attack_library", "fallback_patches", "learner_agent", "mutator_agent"]
-packages = ["commands", "recon"]
+packages = ["commands", "recon", "tui", "tui.widgets", "tui.screens"]
