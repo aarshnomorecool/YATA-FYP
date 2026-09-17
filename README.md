@@ -385,6 +385,17 @@ No functionality is lost.
 
 ---
 
+# License
+
+This project is dual-licensed under:
+
+* MIT ([LICENSE-MIT](LICENSE-MIT))
+* Apache-2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+
+You may choose either license.
+
+---
+
 # FAR AWAY 2026
 
 Submitted under:
