@@ -2,6 +2,9 @@
 
 ### Yet Another Threat Antagonist
 
+[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative&logoColor=white)](LICENSE-MIT)
+[![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?logo=apache&logoColor=white)](LICENSE-APACHE)
+
 > The Cybersecurity Ouroboros
 
 An autonomous security agent that attacks a codebase, heals the vulnerabilities it proves, attacks its own remediations, and learns from every assessment.
