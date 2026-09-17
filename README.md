@@ -4,6 +4,9 @@
 
 [![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg?logo=opensourceinitiative&logoColor=white)](LICENSE-MIT)
 [![Apache 2.0 License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?logo=apache&logoColor=white)](LICENSE-APACHE)
+[![GNU GPL v3 License](https://img.shields.io/badge/License-GPLv3-blue.svg?logo=gnu&logoColor=white)](LICENSE-GPL-3.0)
+[![Open Source](https://img.shields.io/badge/Open%20Source-Yes-brightgreen.svg?logo=opensourceinitiative&logoColor=white)](https://opensource.org/licenses)
+[![Free Software](https://img.shields.io/badge/Free%20Software-GNU-2ea44f.svg?logo=gnu&logoColor=white)](https://www.gnu.org/licenses/)
 
 > The Cybersecurity Ouroboros
 
@@ -390,12 +393,13 @@ No functionality is lost.
 
 # License
 
-This project is dual-licensed under:
+This project is multi-licensed under:
 
 * MIT ([LICENSE-MIT](LICENSE-MIT))
 * Apache-2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+* GNU GPL v3 ([LICENSE-GPL-3.0](LICENSE-GPL-3.0))
 
-You may choose either license.
+You may choose any one of these licenses.
 
 ---
 
