@@ -7,7 +7,7 @@
 [![GNU GPL v3 License](https://img.shields.io/badge/License-GPLv3-blue.svg?logo=gnu&logoColor=white)](LICENSE-GPL-3.0)
 [![agentic](https://img.shields.io/badge/Open%20Source-Yes-brightgreen.svg?logo=opensourceinitiative&logoColor=white)](https://opensource.org/licenses)
 [![Open source Software](https://img.shields.io/badge/Free%20Software-GNU-2ea44f.svg?logo=gnu&logoColor=white)](https://www.gnu.org/licenses/)
-
+![nVIDIA models](https://img.shields.io/badge/nVIDIA-%2376B900.svg?style=for-the-badge&logo=nVIDIA&logoColor=white)
 > The Cybersecurity Ouroboros
 
 An autonomous security agent that attacks a codebase, heals the vulnerabilities it proves, attacks its own remediations, and learns from every assessment.
